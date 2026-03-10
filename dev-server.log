@@ -1,0 +1,66 @@
+
+> refund-risk-control-system@0.1.0 dev
+> next dev
+
+   ▲ Next.js 15.5.12
+   - Local:        http://localhost:3000
+   - Network:      http://192.168.110.175:3000
+   - Environments: .env
+
+ ✓ Starting...
+ ✓ Ready in 3.8s
+ ○ Compiling / ...
+ ✓ Compiled / in 2.7s (1809 modules)
+ GET / 200 in 4040ms
+ ✓ Compiled /imports in 493ms (1819 modules)
+ GET /imports 200 in 707ms
+ ○ Compiling /leads ...
+ ✓ Compiled /leads in 512ms (1834 modules)
+ GET /leads 200 in 642ms
+ ○ Compiling /api/leads ...
+ ✓ Compiled /api/leads in 615ms (1854 modules)
+ POST /api/leads 400 in 818ms
+ ✓ Compiled /funnel in 389ms (1864 modules)
+ GET /funnel 200 in 496ms
+ GET /leads 200 in 810ms
+ ✓ Compiled /api/leads/[id] in 372ms (1866 modules)
+ PATCH /api/leads/cmmj0kj800047trzkgwxpz3ap 200 in 1049ms
+ GET /leads 200 in 137ms
+ GET /imports 200 in 144ms
+ GET /leads 200 in 76ms
+ ✓ Compiled in 2s (1830 modules)
+ GET /funnel 200 in 1998ms
+ GET /funnel 200 in 125ms
+ GET /leads 200 in 2138ms
+ GET /leads 200 in 147ms
+ ✓ Compiled in 336ms (831 modules)
+ GET /funnel 200 in 166ms
+ GET /leads 200 in 179ms
+ ✓ Compiled in 214ms (831 modules)
+ GET /funnel 200 in 130ms
+ GET /leads 200 in 143ms
+ ○ Compiling /api/reports/lead-intake-template ...
+ ✓ Compiled /api/reports/lead-intake-template in 585ms (1849 modules)
+ GET /api/reports/lead-intake-template 200 in 869ms
+ ✓ Compiled in 196ms (831 modules)
+ ○ Compiling /_error ...
+ ✓ Compiled /_error in 1306ms (2195 modules)
+ GET /funnel 500 in 3811ms
+ GET /funnel 500 in 370ms
+ GET /leads 500 in 3811ms
+ GET /leads 500 in 331ms
+ GET /funnel 500 in 733ms
+ GET /funnel 500 in 37ms
+ GET /funnel 500 in 214ms
+ GET /funnel 500 in 92ms
+ GET /leads 500 in 967ms
+ GET /leads 500 in 77ms
+ GET /funnel 500 in 133ms
+ GET /funnel 500 in 59ms
+ GET /leads 500 in 372ms
+ GET /leads 500 in 51ms
+ GET /leads 500 in 328ms
+ GET /leads 500 in 41ms
+ GET /leads 500 in 838ms
+ GET /leads 500 in 269ms
+[?25h

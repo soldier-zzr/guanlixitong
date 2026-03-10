@@ -1,0 +1,485 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  SALES
+  DELIVERY
+  SUPERVISOR
+}
+
+enum UserTitle {
+  ADMIN
+  SALES_MANAGER
+  SALES
+  PRIVATE_OPS
+  PRIVATE_SUPERVISOR
+  DELIVERY_OPS
+  DELIVERY_SUPERVISOR
+}
+
+enum LeadStatus {
+  NEW
+  ASSIGNED
+  CONTACTED
+  WECHAT_ADDED
+  IN_GROUP
+  CONVERTED
+  LOST
+}
+
+enum AssignmentResult {
+  PENDING
+  ACCEPTED
+  CONTACTED
+  NO_RESPONSE
+  CONVERTED
+  LOST
+}
+
+enum FunnelEventType {
+  LEAD_INTAKE
+  ASSIGNED
+  FIRST_CONTACT
+  ADD_WECHAT
+  JOIN_GROUP
+  ATTEND_PUBLIC_COURSE
+  PAY_SEAT_CARD
+  PAY_FULL
+  CHASE_FINAL_PAYMENT
+  PAY_FINAL_PAYMENT
+  FORMAL_ENROLLMENT
+}
+
+enum RiskLevel {
+  A
+  B
+  C
+}
+
+enum StudentStatus {
+  LOW_PRICE_PURCHASED
+  WECHAT_ADDED
+  IN_GROUP_LEARNING
+  SEAT_CARD_PAID
+  FINAL_PAYMENT_PENDING
+  FORMALLY_ENROLLED
+  PRE_START_OBSERVING
+  REFUND_WARNING
+  REFUND_REQUESTED
+  LEVEL1_PROCESSING
+  LEVEL2_PROCESSING
+  LEVEL3_PROCESSING
+  RETAINED
+  REFUNDED
+  CLOSED
+}
+
+enum EnrollmentStage {
+  LOW_PRICE
+  WECHAT
+  PUBLIC_COURSE
+  SEAT_CARD
+  FINAL_PAYMENT
+  FORMAL_ENROLLMENT
+  PRE_START
+  REFUND
+}
+
+enum PaymentStatus {
+  NOT_STARTED
+  PARTIAL
+  PAID
+  REFUNDED
+}
+
+enum RefundLevel {
+  LEVEL1
+  LEVEL2
+  LEVEL3
+}
+
+enum RefundStatus {
+  OPEN
+  PROCESSING
+  ESCALATED
+  RETAINED
+  REFUNDED
+  REJECTED
+  CLOSED
+}
+
+enum RefundApprovalDecision {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum RefundActionType {
+  CREATED
+  CONTACTED
+  NOTE
+  ESCALATED
+  RETAINED
+  APPROVED_REFUND
+  REJECTED_REFUND
+  CLOSED
+}
+
+model User {
+  id               String          @id @default(cuid())
+  name             String
+  role             UserRole
+  title            UserTitle?
+  email            String?         @unique
+  phone            String?
+  active           Boolean         @default(true)
+  managerId        String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  manager          User?           @relation("UserManager", fields: [managerId], references: [id], onDelete: SetNull)
+  directReports    User[]          @relation("UserManager")
+  studentsAsSales  Student[]       @relation("SalesOwner")
+  studentsDelivery Student[]       @relation("DeliveryOwner")
+  riskEvents       RiskEvent[]
+  refundRequests   RefundRequest[] @relation("CurrentHandler")
+  refundCreated    RefundRequest[] @relation("RefundCreator")
+  refundActions    RefundAction[]
+  refundApprovals  RefundApproval[] @relation("RefundApprover")
+  campaigns          Campaign[]        @relation("CampaignOwner")
+  assignedLeads      LeadAssignment[]  @relation("LeadAssignee")
+  currentLeadPool    Lead[]            @relation("LeadCurrentAssignee")
+  funnelEvents       SalesFunnelEvent[]
+  tailPaymentEnrollments Enrollment[]  @relation("TailPaymentOwner")
+
+  @@index([role, managerId, active])
+}
+
+model Campaign {
+  id          String      @id @default(cuid())
+  name        String
+  channel     String
+  platform    String
+  materialType String?
+  ownerId     String?
+  budget      Float       @default(0)
+  spentAmount Float       @default(0)
+  status      String      @default("ACTIVE")
+  startAt     DateTime
+  endAt       DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  owner       User?       @relation("CampaignOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  creatives   AdCreative[]
+  leads       Lead[]
+
+  @@index([channel, startAt])
+}
+
+model AdCreative {
+  id             String   @id @default(cuid())
+  campaignId     String
+  creativeName   String
+  creativeCode   String   @unique
+  themeTag       String?
+  publishAt      DateTime?
+  impressions    Int      @default(0)
+  clicks         Int      @default(0)
+  leadsCount     Int      @default(0)
+  validLeadsCount Int     @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  campaign       Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  leads          Lead[]
+
+  @@index([campaignId, publishAt])
+}
+
+model Cohort {
+  id            String          @id @default(cuid())
+  code          String          @unique
+  name          String
+  courseVersion String
+  startDate     DateTime
+  endDate       DateTime?
+  adSpend       Float           @default(0)
+  targetRevenue Float           @default(0)
+  note          String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  students      Student[]
+  enrollments   Enrollment[]
+  roiStat       RoiPeriodStat?
+
+  @@index([startDate])
+}
+
+model Student {
+  id                     String          @id @default(cuid())
+  name                   String
+  phone                  String          @unique
+  city                   String?
+  sourceChannel          String?
+  sourceCampaign         String?
+  lowPriceCourseName     String?
+  lowPricePurchaseAt     DateTime?
+  lowPriceAmount         Float           @default(0)
+  wechatAddedAt          DateTime?
+  publicCourseJoinedAt   DateTime?
+  publicCourseAttendance String?
+  riskLevel              RiskLevel       @default(A)
+  status                 StudentStatus   @default(LOW_PRICE_PURCHASED)
+  currentStage           EnrollmentStage @default(LOW_PRICE)
+  leadId                 String?         @unique
+  intentNote             String?
+  trackLane              String?
+  tags                   String?
+  cohortId               String?
+  salesOwnerId           String?
+  deliveryOwnerId        String?
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+  cohort                 Cohort?         @relation(fields: [cohortId], references: [id])
+  salesOwner             User?           @relation("SalesOwner", fields: [salesOwnerId], references: [id])
+  deliveryOwner          User?           @relation("DeliveryOwner", fields: [deliveryOwnerId], references: [id])
+  lead                   Lead?           @relation(fields: [leadId], references: [id])
+  enrollments            Enrollment[]
+  riskEvents             RiskEvent[]
+  refundRequests         RefundRequest[]
+  funnelEvents           SalesFunnelEvent[]
+
+  @@index([status, riskLevel])
+  @@index([cohortId, salesOwnerId])
+}
+
+model Lead {
+  id              String            @id @default(cuid())
+  name            String
+  phone           String            @unique
+  city            String?
+  sourceTime      DateTime
+  orderInfo       String?
+  intentLevel     String?
+  qualityScore    Int               @default(0)
+  leadStatus      LeadStatus        @default(NEW)
+  note            String?
+  campaignId      String?
+  creativeId      String?
+  currentAssigneeId String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  campaign        Campaign?         @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  creative        AdCreative?       @relation(fields: [creativeId], references: [id], onDelete: SetNull)
+  currentAssignee User?             @relation("LeadCurrentAssignee", fields: [currentAssigneeId], references: [id], onDelete: SetNull)
+  assignments     LeadAssignment[]
+  student         Student?
+  funnelEvents    SalesFunnelEvent[]
+
+  @@index([leadStatus, sourceTime])
+  @@index([campaignId, creativeId])
+}
+
+model LeadAssignment {
+  id               String           @id @default(cuid())
+  leadId           String
+  assignedToId     String
+  assignedAt       DateTime
+  acceptedAt       DateTime?
+  firstContactAt   DateTime?
+  responseMinutes  Int?
+  isTimeout        Boolean          @default(false)
+  result           AssignmentResult @default(PENDING)
+  note             String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  lead             Lead             @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  assignedTo       User             @relation("LeadAssignee", fields: [assignedToId], references: [id], onDelete: Cascade)
+
+  @@index([assignedToId, assignedAt])
+  @@index([leadId, assignedAt])
+}
+
+model SalesFunnelEvent {
+  id         String          @id @default(cuid())
+  leadId      String?
+  studentId   String?
+  ownerId     String?
+  eventType   FunnelEventType
+  stage       EnrollmentStage?
+  result      String?
+  eventAt     DateTime
+  note        String?
+  createdAt   DateTime        @default(now())
+  lead        Lead?           @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  student     Student?        @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  owner       User?           @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+
+  @@index([ownerId, eventType, eventAt])
+  @@index([leadId, studentId])
+}
+
+model Enrollment {
+  id                  String          @id @default(cuid())
+  studentId           String
+  cohortId            String?
+  courseVersion       String
+  lowPriceCourseName  String?
+  lowPriceAmount      Float           @default(0)
+  lowPricePurchaseAt  DateTime?
+  wechatAddedAt       DateTime?
+  publicCourseJoinedAt DateTime?
+  publicCourseLearning String?
+  seatCardAmount      Float           @default(0)
+  seatCardStatus      PaymentStatus   @default(NOT_STARTED)
+  seatCardPaidAt      DateTime?
+  finalPaymentAmount  Float           @default(0)
+  finalPaymentStatus  PaymentStatus   @default(NOT_STARTED)
+  finalPaymentPaidAt  DateTime?
+  totalReceived       Float           @default(0)
+  fullPaymentDirect   Boolean         @default(false)
+  formallyEnrolledAt  DateTime?
+  observationStartedAt DateTime?
+  currentStage        EnrollmentStage @default(LOW_PRICE)
+  leadSourceLabel     String?
+  tailPaymentOwnerId  String?
+  handoffToDeliveryAt DateTime?
+  note                String?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  student             Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  cohort              Cohort?         @relation(fields: [cohortId], references: [id])
+  tailPaymentOwner    User?           @relation("TailPaymentOwner", fields: [tailPaymentOwnerId], references: [id], onDelete: SetNull)
+  riskEvents          RiskEvent[]
+  refundRequests      RefundRequest[]
+
+  @@index([studentId, currentStage])
+  @@index([cohortId])
+}
+
+model RiskEvent {
+  id            String          @id @default(cuid())
+  studentId     String
+  enrollmentId  String?
+  signalCode    String
+  signalLabel   String
+  stage         EnrollmentStage
+  severityScore Int
+  note          String?
+  occurredAt    DateTime
+  reporterId    String?
+  createdAt     DateTime        @default(now())
+  student       Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  enrollment    Enrollment?     @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+  reporter      User?           @relation(fields: [reporterId], references: [id], onDelete: SetNull)
+
+  @@index([studentId, occurredAt])
+  @@index([stage, severityScore])
+}
+
+model RefundRequest {
+  id               String         @id @default(cuid())
+  requestNo        String         @unique
+  studentId        String
+  enrollmentId     String?
+  currentHandlerId String?
+  createdById      String?
+  reasonCategory   String
+  reasonSubcategory String
+  requestStage     EnrollmentStage
+  requestNote      String?
+  requestSource    String?
+  requestedAt      DateTime
+  requestedAmount  Float          @default(0)
+  currentLevel     RefundLevel    @default(LEVEL1)
+  status           RefundStatus   @default(OPEN)
+  finalResult      String?
+  refundedAmount   Float          @default(0)
+  retainedAmount   Float          @default(0)
+  resolvedAt       DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  student          Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  enrollment       Enrollment?    @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+  currentHandler   User?          @relation("CurrentHandler", fields: [currentHandlerId], references: [id], onDelete: SetNull)
+  createdBy        User?          @relation("RefundCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  actions          RefundAction[]
+  approvals        RefundApproval[]
+
+  @@index([status, currentLevel])
+  @@index([studentId, requestedAt])
+}
+
+model RefundApproval {
+  id              String                 @id @default(cuid())
+  refundRequestId String
+  approverId      String
+  decision        RefundApprovalDecision @default(PENDING)
+  note            String?
+  evidenceUrls    String?
+  decidedAt       DateTime?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  refundRequest   RefundRequest          @relation(fields: [refundRequestId], references: [id], onDelete: Cascade)
+  approver        User                   @relation("RefundApprover", fields: [approverId], references: [id], onDelete: Cascade)
+
+  @@unique([refundRequestId, approverId])
+  @@index([approverId, decision])
+}
+
+model RefundAction {
+  id              String           @id @default(cuid())
+  refundRequestId String
+  actionType      RefundActionType
+  fromLevel       RefundLevel?
+  toLevel         RefundLevel?
+  actorId         String?
+  outcome         String?
+  note            String?
+  actedAt         DateTime
+  nextFollowUpAt  DateTime?
+  createdAt       DateTime         @default(now())
+  refundRequest   RefundRequest    @relation(fields: [refundRequestId], references: [id], onDelete: Cascade)
+  actor           User?            @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([refundRequestId, actedAt])
+}
+
+model RoiPeriodStat {
+  id              String   @id @default(cuid())
+  cohortId        String   @unique
+  adSpend         Float    @default(0)
+  seatCardRevenue Float    @default(0)
+  finalRevenue    Float    @default(0)
+  grossRevenue    Float    @default(0)
+  refundAmount    Float    @default(0)
+  netRevenue      Float    @default(0)
+  grossRoi        Float    @default(0)
+  netRoi          Float    @default(0)
+  refundCount     Int      @default(0)
+  warningCount    Int      @default(0)
+  studentCount    Int      @default(0)
+  computedAt      DateTime @default(now())
+  cohort          Cohort   @relation(fields: [cohortId], references: [id], onDelete: Cascade)
+}
+
+model Dictionary {
+  id         String   @id @default(cuid())
+  type       String
+  code       String
+  label      String
+  parentCode String?
+  sortOrder  Int      @default(0)
+  extraJson  String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([type, code])
+  @@index([type, parentCode, sortOrder])
+}
