@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
+import { getCurrentActorContext } from "@/lib/server/actor";
 import { importIntakeWorkbook, importTailWorkbook } from "@/lib/server/importers";
 import { recalculateAllCohortStats } from "@/lib/server/recompute";
 
 export async function POST(request: Request) {
   try {
+    const { actor, permissions } = await getCurrentActorContext();
     const contentType = request.headers.get("content-type") || "";
     let mode: string | null = null;
     let filePath: string | null = null;
@@ -24,11 +26,17 @@ export async function POST(request: Request) {
     }
 
     if (mode === "front") {
-      const result = await importIntakeWorkbook(fileBuffer ?? filePath ?? "");
+      if (!permissions.canInputLeads) {
+        return NextResponse.json({ message: "当前岗位没有批量导入接量表权限" }, { status: 403 });
+      }
+      const result = await importIntakeWorkbook(fileBuffer ?? filePath ?? "", actor?.id ?? null);
       return NextResponse.json(result);
     }
 
     if (mode === "mid") {
+      if (!permissions.canManageCohorts) {
+        return NextResponse.json({ message: "当前岗位没有导入中后端工单权限" }, { status: 403 });
+      }
       const result = await importTailWorkbook(fileBuffer ?? filePath ?? "");
       await recalculateAllCohortStats();
       return NextResponse.json(result);

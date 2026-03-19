@@ -1,5 +1,7 @@
 import {
   AssignmentResult,
+  AuditActionType,
+  AuditEntityType,
   EnrollmentStage,
   FunnelEventType,
   LeadStatus,
@@ -14,7 +16,13 @@ import {
   UserRole
 } from "@prisma/client";
 import { prisma } from "../lib/server/db";
-import { recalculateAllCohortStats } from "../lib/server/recompute";
+import { hashPassword } from "../lib/server/password";
+import {
+  createAuditLog,
+  recalculateAllCohortStats,
+  upsertRevenueLedgerEntriesForEnrollment,
+  upsertRevenueLedgerEntryForRefund
+} from "../lib/server/recompute";
 import { refundReasonCatalog, riskSignalCatalog } from "../lib/server/config";
 
 function daysAgo(days: number, hour = 10) {
@@ -25,8 +33,12 @@ function daysAgo(days: number, hour = 10) {
 }
 
 async function main() {
+  const defaultPasswordHash = hashPassword("zf123456");
+
   await prisma.salesFunnelEvent.deleteMany();
   await prisma.leadAssignment.deleteMany();
+  await prisma.auditLog.deleteMany();
+  await prisma.revenueLedger.deleteMany();
   await prisma.refundAction.deleteMany();
   await prisma.refundApproval.deleteMany();
   await prisma.refundRequest.deleteMany();
@@ -107,14 +119,23 @@ async function main() {
   }
 
   const admin = await prisma.user.create({
-    data: { name: "韩总", role: UserRole.ADMIN, title: UserTitle.ADMIN, email: "admin@example.com" }
+    data: {
+      name: "韩总",
+      role: UserRole.ADMIN,
+      title: UserTitle.ADMIN,
+      email: "admin@example.com",
+      phone: "13900000001",
+      passwordHash: defaultPasswordHash
+    }
   });
   const salesManagerA = await prisma.user.create({
     data: {
       name: "郑强",
       role: UserRole.SUPERVISOR,
       title: UserTitle.SALES_MANAGER,
-      email: "zhengqiang@example.com"
+      email: "zhengqiang@example.com",
+      phone: "13900000002",
+      passwordHash: defaultPasswordHash
     }
   });
   const salesManagerB = await prisma.user.create({
@@ -122,7 +143,9 @@ async function main() {
       name: "靳康",
       role: UserRole.SUPERVISOR,
       title: UserTitle.SALES_MANAGER,
-      email: "jikang@example.com"
+      email: "jikang@example.com",
+      phone: "13900000003",
+      passwordHash: defaultPasswordHash
     }
   });
   const deliveryManager = await prisma.user.create({
@@ -130,7 +153,9 @@ async function main() {
       name: "王子阳",
       role: UserRole.SUPERVISOR,
       title: UserTitle.DELIVERY_SUPERVISOR,
-      email: "wangziyang@example.com"
+      email: "wangziyang@example.com",
+      phone: "13900000004",
+      passwordHash: defaultPasswordHash
     }
   });
   const salesA = await prisma.user.create({
@@ -139,6 +164,8 @@ async function main() {
       role: UserRole.SALES,
       title: UserTitle.SALES,
       email: "wangjiuyu@example.com",
+      phone: "13900000005",
+      passwordHash: defaultPasswordHash,
       managerId: salesManagerB.id
     }
   });
@@ -148,6 +175,8 @@ async function main() {
       role: UserRole.SALES,
       title: UserTitle.SALES,
       email: "guofengjiao@example.com",
+      phone: "13900000006",
+      passwordHash: defaultPasswordHash,
       managerId: salesManagerB.id
     }
   });
@@ -157,6 +186,8 @@ async function main() {
       role: UserRole.SALES,
       title: UserTitle.SALES,
       email: "maxiaojing@example.com",
+      phone: "13900000007",
+      passwordHash: defaultPasswordHash,
       managerId: salesManagerB.id
     }
   });
@@ -166,6 +197,8 @@ async function main() {
       role: UserRole.SALES,
       title: UserTitle.SALES,
       email: "wanglei@example.com",
+      phone: "13900000008",
+      passwordHash: defaultPasswordHash,
       managerId: salesManagerA.id
     }
   });
@@ -175,6 +208,8 @@ async function main() {
       role: UserRole.SALES,
       title: UserTitle.SALES,
       email: "wangchao@example.com",
+      phone: "13900000009",
+      passwordHash: defaultPasswordHash,
       managerId: salesManagerA.id
     }
   });
@@ -184,6 +219,8 @@ async function main() {
       role: UserRole.DELIVERY,
       title: UserTitle.DELIVERY_OPS,
       email: "aning@example.com",
+      phone: "13900000010",
+      passwordHash: defaultPasswordHash,
       managerId: deliveryManager.id
     }
   });
@@ -193,12 +230,25 @@ async function main() {
       role: UserRole.DELIVERY,
       title: UserTitle.DELIVERY_OPS,
       email: "adu@example.com",
+      phone: "13900000011",
+      passwordHash: defaultPasswordHash,
       managerId: deliveryManager.id
+    }
+  });
+  const marketingA = await prisma.user.create({
+    data: {
+      name: "肖景文",
+      role: UserRole.SALES,
+      title: UserTitle.MARKETING,
+      email: "xiaojingwen@example.com",
+      phone: "13900000012",
+      passwordHash: defaultPasswordHash
     }
   });
 
   const users = [
     admin,
+    marketingA,
     salesManagerA,
     salesManagerB,
     deliveryManager,
@@ -842,6 +892,17 @@ async function main() {
         note: "自动生成的成交过程"
       }
     });
+    await upsertRevenueLedgerEntriesForEnrollment({
+      enrollmentId: enrollment.id,
+      actorId: profile.salesOwnerId
+    });
+    await createAuditLog({
+      actorId: profile.salesOwnerId,
+      entityType: AuditEntityType.ENROLLMENT,
+      entityId: enrollment.id,
+      action: AuditActionType.CREATED,
+      note: "seed 报名记录"
+    });
 
     enrollmentMap.set(student.id, enrollment.id);
   }
@@ -907,7 +968,7 @@ async function main() {
     [students[5], "ASK_REFUND_POLICY", EnrollmentStage.REFUND, supervisor.id, "强烈要求退款"],
     [students[7], "NO_GROUP_JOIN", EnrollmentStage.PUBLIC_COURSE, salesB.id, "拍卡后未进群"],
     [students[7], "NO_PHONE_RESPONSE", EnrollmentStage.FINAL_PAYMENT, salesB.id, "销售连续两天未联系上"],
-    [students[10], "NOT_SUITABLE", EnrollmentStage.PRE_START, salesB.id, "表示觉得课程不适合自己"],
+    [students[10], "NOT_SUITABLE", EnrollmentStage.PRE_START, salesA.id, "表示觉得课程不适合自己"],
     [students[11], "PRICE_PRESSURE", EnrollmentStage.FINAL_PAYMENT, salesB.id, "只付占位卡，迟迟不补尾款"]
   ] as const;
 
@@ -1113,14 +1174,14 @@ async function main() {
       reasonSubcategory: "认为不适合当前阶段",
       amount: 6980,
       requestedAt: daysAgo(1, 9),
-      currentHandlerId: salesB.id,
-      createdById: salesB.id,
+      currentHandlerId: salesA.id,
+      createdById: salesA.id,
       actions: [
         {
           actionType: RefundActionType.CREATED,
           fromLevel: RefundLevel.LEVEL1,
           toLevel: RefundLevel.LEVEL1,
-          actorId: salesB.id,
+          actorId: salesA.id,
           note: "学员说课程节奏太快",
           actedAt: daysAgo(1, 9)
         }
@@ -1134,7 +1195,7 @@ async function main() {
   ];
 
   for (const [index, item] of refundCases.entries()) {
-    await prisma.refundRequest.create({
+    const refund = await prisma.refundRequest.create({
       data: {
         requestNo: `RR2026030${index + 1}`,
         studentId: item.student.id,
@@ -1165,6 +1226,10 @@ async function main() {
         }
       }
     });
+    await upsertRevenueLedgerEntryForRefund({
+      refundRequestId: refund.id,
+      actorId: item.currentHandlerId
+    });
   }
 
   await recalculateAllCohortStats();
@@ -1177,7 +1242,7 @@ async function main() {
   console.log(`Leads: ${leads.length + extraLeadBlueprints.length}`);
   console.log(`Students: ${students.length}`);
   console.log(`Refund cases: ${refundCases.length}`);
-  console.log(`Admin login placeholder: ${admin.email}`);
+  console.log(`Admin login: ${admin.phone} / zf123456`);
 }
 
 main()

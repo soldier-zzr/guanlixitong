@@ -16,6 +16,7 @@ enum UserRole {
 
 enum UserTitle {
   ADMIN
+  MARKETING
   SALES_MANAGER
   SALES
   PRIVATE_OPS
@@ -132,6 +133,38 @@ enum RefundActionType {
   CLOSED
 }
 
+enum RevenueLedgerType {
+  SEAT_CARD_RECEIPT
+  FINAL_PAYMENT_RECEIPT
+  REFUND_OUTFLOW
+  RECOGNIZED_REVENUE
+}
+
+enum AuditEntityType {
+  LEAD
+  STUDENT
+  ENROLLMENT
+  REFUND_REQUEST
+  RISK_EVENT
+  USER
+  COHORT
+  SYSTEM
+}
+
+enum AuditActionType {
+  CREATED
+  UPDATED
+  STATUS_CHANGED
+  APPROVED
+  REJECTED
+  ESCALATED
+  RETAINED
+  REFUNDED
+  CLOSED
+  IMPORTED
+  AUTO_RULE_TRIGGERED
+}
+
 model User {
   id               String          @id @default(cuid())
   name             String
@@ -139,6 +172,7 @@ model User {
   title            UserTitle?
   email            String?         @unique
   phone            String?
+  passwordHash     String?
   active           Boolean         @default(true)
   managerId        String?
   createdAt        DateTime        @default(now())
@@ -155,8 +189,11 @@ model User {
   campaigns          Campaign[]        @relation("CampaignOwner")
   assignedLeads      LeadAssignment[]  @relation("LeadAssignee")
   currentLeadPool    Lead[]            @relation("LeadCurrentAssignee")
+  sourcedLeads       Lead[]            @relation("LeadSourceOwner")
   funnelEvents       SalesFunnelEvent[]
   tailPaymentEnrollments Enrollment[]  @relation("TailPaymentOwner")
+  revenueLedgers     RevenueLedger[]
+  auditLogs          AuditLog[]        @relation("AuditActor")
 
   @@index([role, managerId, active])
 }
@@ -216,6 +253,7 @@ model Cohort {
   students      Student[]
   enrollments   Enrollment[]
   roiStat       RoiPeriodStat?
+  revenueLedgers RevenueLedger[]
 
   @@index([startDate])
 }
@@ -253,6 +291,7 @@ model Student {
   riskEvents             RiskEvent[]
   refundRequests         RefundRequest[]
   funnelEvents           SalesFunnelEvent[]
+  revenueLedgers         RevenueLedger[]
 
   @@index([status, riskLevel])
   @@index([cohortId, salesOwnerId])
@@ -261,7 +300,7 @@ model Student {
 model Lead {
   id              String            @id @default(cuid())
   name            String
-  phone           String            @unique
+  phone           String
   city            String?
   sourceTime      DateTime
   orderInfo       String?
@@ -269,11 +308,13 @@ model Lead {
   qualityScore    Int               @default(0)
   leadStatus      LeadStatus        @default(NEW)
   note            String?
+  sourceOwnerId   String?
   campaignId      String?
   creativeId      String?
   currentAssigneeId String?
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
+  sourceOwner     User?             @relation("LeadSourceOwner", fields: [sourceOwnerId], references: [id], onDelete: SetNull)
   campaign        Campaign?         @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   creative        AdCreative?       @relation(fields: [creativeId], references: [id], onDelete: SetNull)
   currentAssignee User?             @relation("LeadCurrentAssignee", fields: [currentAssigneeId], references: [id], onDelete: SetNull)
@@ -282,7 +323,9 @@ model Lead {
   funnelEvents    SalesFunnelEvent[]
 
   @@index([leadStatus, sourceTime])
+  @@index([sourceOwnerId, sourceTime])
   @@index([campaignId, creativeId])
+  @@index([phone, sourceTime])
 }
 
 model LeadAssignment {
@@ -357,6 +400,7 @@ model Enrollment {
   tailPaymentOwner    User?           @relation("TailPaymentOwner", fields: [tailPaymentOwnerId], references: [id], onDelete: SetNull)
   riskEvents          RiskEvent[]
   refundRequests      RefundRequest[]
+  revenueLedgers      RevenueLedger[]
 
   @@index([studentId, currentStage])
   @@index([cohortId])
@@ -410,6 +454,7 @@ model RefundRequest {
   createdBy        User?          @relation("RefundCreator", fields: [createdById], references: [id], onDelete: SetNull)
   actions          RefundAction[]
   approvals        RefundApproval[]
+  revenueLedgers   RevenueLedger[]
 
   @@index([status, currentLevel])
   @@index([studentId, requestedAt])
@@ -482,4 +527,48 @@ model Dictionary {
 
   @@unique([type, code])
   @@index([type, parentCode, sortOrder])
+}
+
+model RevenueLedger {
+  id              String            @id @default(cuid())
+  externalKey     String            @unique
+  ledgerType      RevenueLedgerType
+  studentId       String?
+  cohortId        String?
+  enrollmentId    String?
+  refundRequestId String?
+  actorId         String?
+  amount          Float             @default(0)
+  occurredAt      DateTime
+  note            String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  student         Student?          @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  cohort          Cohort?           @relation(fields: [cohortId], references: [id], onDelete: SetNull)
+  enrollment      Enrollment?       @relation(fields: [enrollmentId], references: [id], onDelete: SetNull)
+  refundRequest   RefundRequest?    @relation(fields: [refundRequestId], references: [id], onDelete: SetNull)
+  actor           User?             @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([cohortId, occurredAt])
+  @@index([studentId, occurredAt])
+  @@index([ledgerType, occurredAt])
+}
+
+model AuditLog {
+  id          String          @id @default(cuid())
+  actorId     String?
+  entityType  AuditEntityType
+  entityId    String
+  action      AuditActionType
+  fieldName   String?
+  fromValue   String?
+  toValue     String?
+  note        String?
+  metaJson    String?
+  occurredAt  DateTime        @default(now())
+  createdAt   DateTime        @default(now())
+  actor       User?           @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId, occurredAt])
+  @@index([actorId, occurredAt])
 }

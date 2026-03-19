@@ -2,13 +2,15 @@ import {
   EnrollmentStage,
   FunnelEventType,
   LeadStatus,
+  PaymentStatus,
   RefundApprovalDecision,
   RefundStatus,
+  RevenueLedgerType,
   RiskLevel,
   StudentStatus,
   type Prisma
 } from "@prisma/client";
-import { prisma } from "@/lib/server/db";
+import { ensureDatabaseReady, prisma } from "@/lib/server/db";
 import {
   enrollmentStageLabelMap,
   funnelEventLabelMap,
@@ -17,6 +19,7 @@ import {
   riskLevelLabelMap,
   studentStatusLabelMap
 } from "@/lib/server/config";
+import { type DataScope } from "@/lib/server/actor";
 
 type StudentFilters = {
   search?: string;
@@ -32,7 +35,162 @@ type LeadFilters = {
   campaignId?: string | "ALL";
 };
 
+type AnalyticsFilters = {
+  mode?: "COHORT" | "AS_OF_DATE" | "NET_CASH";
+  asOfDate?: string;
+};
+
+const globalScope: DataScope = {
+  isGlobal: true,
+  scopeLabel: "全局视角",
+  sourceUserIds: [],
+  salesUserIds: [],
+  deliveryUserIds: []
+};
+
+function getScopedLeadWhere(scope: DataScope): Prisma.LeadWhereInput {
+  if (scope.isGlobal) {
+    return {};
+  }
+
+  if (scope.sourceUserIds.length > 0) {
+    return {
+      sourceOwnerId: {
+        in: scope.sourceUserIds
+      }
+    };
+  }
+
+  return {
+    currentAssigneeId: {
+      in: scope.salesUserIds
+    }
+  };
+}
+
+function getScopedStudentWhere(scope: DataScope): Prisma.StudentWhereInput {
+  if (scope.isGlobal) {
+    return {};
+  }
+
+  const scopedOr: Prisma.StudentWhereInput[] = [];
+
+  if (scope.sourceUserIds.length > 0) {
+    scopedOr.push({
+      lead: {
+        sourceOwnerId: {
+          in: scope.sourceUserIds
+        }
+      }
+    });
+  }
+
+  if (scope.salesUserIds.length > 0) {
+    scopedOr.push({
+      salesOwnerId: {
+        in: scope.salesUserIds
+      }
+    });
+  }
+
+  if (scope.deliveryUserIds.length > 0) {
+    scopedOr.push({
+      deliveryOwnerId: {
+        in: scope.deliveryUserIds
+      }
+    });
+  }
+
+  if (scopedOr.length === 0) {
+    return {
+      id: {
+        in: []
+      }
+    };
+  }
+
+  return scopedOr.length === 1 ? scopedOr[0] : { OR: scopedOr };
+}
+
+function getScopedRefundWhere(scope: DataScope): Prisma.RefundRequestWhereInput {
+  if (scope.isGlobal) {
+    return {};
+  }
+
+  return {
+    student: getScopedStudentWhere(scope)
+  };
+}
+
+function getScopedAssignmentWhere(scope: DataScope): Prisma.LeadAssignmentWhereInput {
+  if (scope.isGlobal) {
+    return {};
+  }
+
+  if (scope.sourceUserIds.length > 0) {
+    return {
+      lead: {
+        sourceOwnerId: {
+          in: scope.sourceUserIds
+        }
+      }
+    };
+  }
+
+  return {
+    assignedToId: {
+      in: scope.salesUserIds
+    }
+  };
+}
+
+function getScopedRevenueLedgerWhere(scope: DataScope): Prisma.RevenueLedgerWhereInput {
+  if (scope.isGlobal) {
+    return {};
+  }
+
+  return {
+    student: getScopedStudentWhere(scope)
+  };
+}
+
+function getScopedFunnelEventWhere(scope: DataScope): Prisma.SalesFunnelEventWhereInput {
+  if (scope.isGlobal) {
+    return {};
+  }
+
+  if (scope.sourceUserIds.length > 0) {
+    return {
+      OR: [
+        {
+          lead: {
+            sourceOwnerId: {
+              in: scope.sourceUserIds
+            }
+          }
+        },
+        {
+          student: {
+            lead: {
+              sourceOwnerId: {
+                in: scope.sourceUserIds
+              }
+            }
+          }
+        }
+      ]
+    };
+  }
+
+  return {
+    ownerId: {
+      in: scope.salesUserIds
+    }
+  };
+}
+
 export async function getLookupOptions() {
+  await ensureDatabaseReady();
   const [users, cohorts, dictionaries, campaigns, creatives] = await Promise.all([
     prisma.user.findMany({
       where: { active: true },
@@ -75,25 +233,59 @@ export async function getLookupOptions() {
   };
 }
 
-export async function getDashboardData() {
-  const [students, cohorts, refundRequests, roiStats, leads, assignments, funnelEvents] = await Promise.all([
+export async function getDashboardData(scope: DataScope = globalScope) {
+  await ensureDatabaseReady();
+  const studentWhere = getScopedStudentWhere(scope);
+  const leadWhere = getScopedLeadWhere(scope);
+  const refundWhere = getScopedRefundWhere(scope);
+  const assignmentWhere = getScopedAssignmentWhere(scope);
+  const funnelWhere = getScopedFunnelEventWhere(scope);
+
+  const [students, cohorts, refundRequests, leads, allLeads, assignments, funnelEvents, ledgers] = await Promise.all([
     prisma.student.findMany({
+      where: studentWhere,
       include: {
         cohort: true,
-        riskEvents: true
+        riskEvents: true,
+        enrollments: {
+          orderBy: { createdAt: "desc" },
+          take: 1
+        }
       }
     }),
     prisma.cohort.findMany({
       orderBy: { startDate: "asc" }
     }),
-    prisma.refundRequest.findMany(),
-    prisma.roiPeriodStat.findMany({
-      include: { cohort: true },
-      orderBy: { cohort: { startDate: "asc" } }
+    prisma.refundRequest.findMany({
+      where: refundWhere,
+      include: {
+        student: {
+          select: {
+            cohortId: true
+          }
+        }
+      }
     }),
-    prisma.lead.findMany(),
-    prisma.leadAssignment.findMany(),
-    prisma.salesFunnelEvent.findMany()
+    prisma.lead.findMany({
+      where: leadWhere,
+      include: {
+        campaign: true
+      }
+    }),
+    prisma.lead.findMany({
+      include: {
+        campaign: true
+      }
+    }),
+    prisma.leadAssignment.findMany({
+      where: assignmentWhere
+    }),
+    prisma.salesFunnelEvent.findMany({
+      where: funnelWhere
+    }),
+    prisma.revenueLedger.findMany({
+      where: getScopedRevenueLedgerWhere(scope)
+    })
   ]);
 
   const totalStudents = students.length;
@@ -148,10 +340,25 @@ export async function getDashboardData() {
     { stage: funnelEventLabelMap.FORMAL_ENROLLMENT, count: formalCount, rate: Number((formalCount / intakeBase).toFixed(3)) }
   ];
 
-  const grossRevenue = roiStats.reduce((sum, item) => sum + item.grossRevenue, 0);
-  const refundAmount = roiStats.reduce((sum, item) => sum + item.refundAmount, 0);
-  const netRevenue = roiStats.reduce((sum, item) => sum + item.netRevenue, 0);
-  const adSpend = roiStats.reduce((sum, item) => sum + item.adSpend, 0);
+  const grossRevenue = ledgers
+    .filter((item) =>
+      item.ledgerType === RevenueLedgerType.SEAT_CARD_RECEIPT ||
+      item.ledgerType === RevenueLedgerType.FINAL_PAYMENT_RECEIPT
+    )
+    .reduce((sum, item) => sum + item.amount, 0);
+  const refundAmount = ledgers
+    .filter((item) => item.ledgerType === RevenueLedgerType.REFUND_OUTFLOW)
+    .reduce((sum, item) => sum + item.amount, 0);
+  const netRevenue = grossRevenue - refundAmount;
+  const adSpend = leads.reduce((sum, lead) => {
+    const campaignSpent = lead.campaign?.spentAmount ?? 0;
+    if (!lead.campaignId || campaignSpent === 0) {
+      return sum;
+    }
+
+    const totalCampaignLeads = allLeads.filter((item) => item.campaignId === lead.campaignId).length || 1;
+    return sum + campaignSpent / totalCampaignLeads;
+  }, 0);
 
   const grossRoi = adSpend > 0 ? grossRevenue / adSpend : 0;
   const netRoi = adSpend > 0 ? netRevenue / adSpend : 0;
@@ -162,8 +369,51 @@ export async function getDashboardData() {
     { name: riskLevelLabelMap.C, value: students.filter((item) => item.riskLevel === RiskLevel.C).length }
   ];
 
+  const cohortStats = cohorts.map((cohort) => {
+    const cohortStudents = students.filter((item) => item.cohortId === cohort.id);
+    const cohortRefunds = refundRequests.filter((item) => item.student.cohortId === cohort.id);
+    const cohortGrossRevenue = ledgers
+      .filter(
+        (item) =>
+          item.cohortId === cohort.id &&
+          (item.ledgerType === RevenueLedgerType.SEAT_CARD_RECEIPT ||
+            item.ledgerType === RevenueLedgerType.FINAL_PAYMENT_RECEIPT)
+      )
+      .reduce((sum, item) => sum + item.amount, 0);
+    const cohortRefundAmount = ledgers
+      .filter((item) => item.cohortId === cohort.id && item.ledgerType === RevenueLedgerType.REFUND_OUTFLOW)
+      .reduce((sum, item) => sum + item.amount, 0);
+    const cohortNetRevenue = cohortGrossRevenue - cohortRefundAmount;
+    const cohortLeadIds = new Set(
+      leads.filter((lead) =>
+        cohortStudents.some((student) => student.leadId === lead.id)
+      ).map((lead) => lead.id)
+    );
+    const cohortAdSpend = allLeads.reduce((sum, lead) => {
+      if (!lead.campaignId || !cohortLeadIds.has(lead.id)) {
+        return sum;
+      }
+
+      const totalCampaignLeads = allLeads.filter((item) => item.campaignId === lead.campaignId).length || 1;
+      return sum + (lead.campaign?.spentAmount ?? 0) / totalCampaignLeads;
+    }, 0);
+
+    return {
+      cohortId: cohort.id,
+      cohort,
+      grossRevenue: cohortGrossRevenue,
+      netRevenue: cohortNetRevenue,
+      refundAmount: cohortRefundAmount,
+      refundCount: cohortRefunds.filter((item) => item.status === RefundStatus.REFUNDED).length,
+      warningCount: cohortStudents.filter((item) => item.riskLevel !== RiskLevel.A).length,
+      studentCount: cohortStudents.length,
+      grossRoi: cohortAdSpend > 0 ? cohortGrossRevenue / cohortAdSpend : 0,
+      netRoi: cohortAdSpend > 0 ? cohortNetRevenue / cohortAdSpend : 0
+    };
+  });
+
   const refundTrend = cohorts.map((cohort) => {
-    const stat = roiStats.find((item) => item.cohortId === cohort.id);
+    const stat = cohortStats.find((item) => item.cohortId === cohort.id);
 
     return {
       period: cohort.code,
@@ -195,12 +445,15 @@ export async function getDashboardData() {
     riskDistribution,
     refundTrend,
     funnelOverview,
-    cohortStats: roiStats
+    cohortStats,
+    scopeLabel: scope.scopeLabel
   };
 }
 
-export async function getStudents(filters: StudentFilters = {}) {
+export async function getStudents(filters: StudentFilters = {}, scope: DataScope = globalScope) {
+  await ensureDatabaseReady();
   const andConditions: Prisma.StudentWhereInput[] = [];
+  const scopedWhere = getScopedStudentWhere(scope);
 
   if (filters.search) {
     andConditions.push({
@@ -229,9 +482,9 @@ export async function getStudents(filters: StudentFilters = {}) {
   const where: Prisma.StudentWhereInput =
     andConditions.length > 0
       ? {
-          AND: andConditions
+          AND: [scopedWhere, ...andConditions]
         }
-      : {};
+      : scopedWhere;
 
   return prisma.student.findMany({
     where,
@@ -255,9 +508,12 @@ export async function getStudents(filters: StudentFilters = {}) {
   });
 }
 
-export async function getStudentDetail(studentId: string) {
-  return prisma.student.findUnique({
-    where: { id: studentId },
+export async function getStudentDetail(studentId: string, scope: DataScope = globalScope) {
+  await ensureDatabaseReady();
+  return prisma.student.findFirst({
+    where: {
+      AND: [{ id: studentId }, getScopedStudentWhere(scope)]
+    },
     include: {
       lead: {
         include: {
@@ -311,8 +567,10 @@ export async function getStudentDetail(studentId: string) {
   });
 }
 
-export async function getLeads(filters: LeadFilters = {}) {
+export async function getLeads(filters: LeadFilters = {}, scope: DataScope = globalScope) {
+  await ensureDatabaseReady();
   const andConditions: Prisma.LeadWhereInput[] = [];
+  const scopedWhere = getScopedLeadWhere(scope);
 
   if (filters.search) {
     andConditions.push({
@@ -336,13 +594,15 @@ export async function getLeads(filters: LeadFilters = {}) {
     andConditions.push({ campaignId: filters.campaignId });
   }
 
-  const where: Prisma.LeadWhereInput = andConditions.length > 0 ? { AND: andConditions } : {};
+  const where: Prisma.LeadWhereInput =
+    andConditions.length > 0 ? { AND: [scopedWhere, ...andConditions] } : scopedWhere;
 
   return prisma.lead.findMany({
     where,
     include: {
       campaign: true,
       creative: true,
+      sourceOwner: true,
       currentAssignee: true,
       student: true,
       assignments: {
@@ -357,9 +617,13 @@ export async function getLeads(filters: LeadFilters = {}) {
   });
 }
 
-export async function getLeadOverview() {
+export async function getLeadOverview(scope: DataScope = globalScope) {
+  await ensureDatabaseReady();
+  const scopedLeadWhere = getScopedLeadWhere(scope);
+  const scopedAssignmentWhere = getScopedAssignmentWhere(scope);
   const [leads, campaigns, creatives, assignments] = await Promise.all([
     prisma.lead.findMany({
+      where: scopedLeadWhere,
       include: {
         campaign: true,
         creative: true
@@ -375,7 +639,9 @@ export async function getLeadOverview() {
         campaign: true
       }
     }),
-    prisma.leadAssignment.findMany()
+    prisma.leadAssignment.findMany({
+      where: scopedAssignmentWhere
+    })
   ]);
 
   const responseSamples = assignments.filter((item) => item.responseMinutes !== null);
@@ -424,9 +690,14 @@ export async function getLeadOverview() {
   };
 }
 
-export async function getRiskStudents(stage?: EnrollmentStage | "ALL") {
-  return prisma.student.findMany({
+export async function getRiskStudents(
+  stage: EnrollmentStage | "ALL" = "ALL",
+  scope: DataScope = globalScope
+) {
+  await ensureDatabaseReady();
+  const students = await prisma.student.findMany({
     where: {
+      AND: [getScopedStudentWhere(scope)],
       OR: [
         {
           riskLevel: {
@@ -453,6 +724,18 @@ export async function getRiskStudents(stage?: EnrollmentStage | "ALL") {
       cohort: true,
       salesOwner: true,
       deliveryOwner: true,
+      lead: {
+        include: {
+          assignments: {
+            orderBy: { assignedAt: "desc" },
+            take: 1
+          }
+        }
+      },
+      enrollments: {
+        orderBy: { createdAt: "desc" },
+        take: 1
+      },
       riskEvents: {
         ...(stage && stage !== "ALL" ? { where: { stage } } : {}),
         orderBy: { occurredAt: "desc" },
@@ -461,10 +744,66 @@ export async function getRiskStudents(stage?: EnrollmentStage | "ALL") {
     },
     orderBy: [{ riskLevel: "desc" }, { updatedAt: "desc" }]
   });
+
+  return students.map((student) => {
+    const latestAssignment = student.lead?.assignments[0];
+    const latestEnrollment = student.enrollments[0];
+    const autoSignals: Array<{ label: string; stage: EnrollmentStage; note: string }> = [];
+
+    if (latestAssignment?.isTimeout) {
+      autoSignals.push({
+        label: "自动预警：首响超时",
+        stage: EnrollmentStage.WECHAT,
+        note: "线索已分配，但首次联系超过 SLA。"
+      });
+    }
+
+    if (
+      student.lead?.currentAssigneeId &&
+      student.lead.leadStatus === LeadStatus.ASSIGNED
+    ) {
+      autoSignals.push({
+        label: "自动预警：已分配未跟进",
+        stage: EnrollmentStage.WECHAT,
+        note: "线索已分配，但当前仍停留在已分配状态。"
+      });
+    }
+
+    if (
+      latestEnrollment?.seatCardStatus === PaymentStatus.PAID &&
+      latestEnrollment.finalPaymentStatus !== PaymentStatus.PAID
+    ) {
+      autoSignals.push({
+        label: "自动预警：已占位未补尾款",
+        stage: EnrollmentStage.FINAL_PAYMENT,
+        note: "占位卡已支付，但尾款仍未完成。"
+      });
+    }
+
+    if (
+      latestEnrollment?.handoffToDeliveryAt &&
+      student.status !== StudentStatus.RETAINED &&
+      student.status !== StudentStatus.REFUNDED &&
+      student.status !== StudentStatus.CLOSED
+    ) {
+      autoSignals.push({
+        label: "自动预警：转交交付后待承接",
+        stage: EnrollmentStage.PRE_START,
+        note: "已转交交付，需重点确认承接动作与稳定度。"
+      });
+    }
+
+    return {
+      ...student,
+      automaticSignals: autoSignals
+    };
+  });
 }
 
-export async function getRefundWorkbench() {
+export async function getRefundWorkbench(scope: DataScope = globalScope) {
+  await ensureDatabaseReady();
   return prisma.refundRequest.findMany({
+    where: getScopedRefundWhere(scope),
     include: {
       student: {
         include: {
@@ -496,15 +835,34 @@ export async function getRefundWorkbench() {
   });
 }
 
-export async function getSalesFunnelData() {
+export async function getSalesFunnelData(scope: DataScope = globalScope) {
+  await ensureDatabaseReady();
   const [salesUsers, events, assignments, students, leads] = await Promise.all([
     prisma.user.findMany({
-      where: { role: "SALES", active: true }
+      where: {
+        role: "SALES",
+        active: true,
+        ...(scope.isGlobal
+          ? {}
+          : {
+              id: {
+                in: scope.salesUserIds
+              }
+            })
+      }
     }),
-    prisma.salesFunnelEvent.findMany(),
-    prisma.leadAssignment.findMany(),
-    prisma.student.findMany(),
-    prisma.lead.findMany()
+    prisma.salesFunnelEvent.findMany({
+      where: getScopedFunnelEventWhere(scope)
+    }),
+    prisma.leadAssignment.findMany({
+      where: getScopedAssignmentWhere(scope)
+    }),
+    prisma.student.findMany({
+      where: getScopedStudentWhere(scope)
+    }),
+    prisma.lead.findMany({
+      where: getScopedLeadWhere(scope)
+    })
   ]);
 
   const stages: FunnelEventType[] = [
@@ -605,6 +963,7 @@ export async function getSalesFunnelData() {
   return {
     funnelTotals,
     bySales,
+    scopeLabel: scope.scopeLabel,
     helpers: {
       leadStatusLabelMap,
       funnelEventLabelMap
@@ -612,7 +971,11 @@ export async function getSalesFunnelData() {
   };
 }
 
-export async function getAnalyticsData() {
+export async function getAnalyticsData(
+  scope: DataScope = globalScope,
+  filters: AnalyticsFilters = {}
+) {
+  await ensureDatabaseReady();
   const formalStatuses: StudentStatus[] = [
     StudentStatus.FORMALLY_ENROLLED,
     StudentStatus.PRE_START_OBSERVING,
@@ -625,11 +988,14 @@ export async function getAnalyticsData() {
     StudentStatus.REFUNDED,
     StudentStatus.CLOSED
   ];
-  const [cohorts, students, refundRequests, roiStats] = await Promise.all([
+  const mode = filters.mode ?? "COHORT";
+  const asOfDate = filters.asOfDate ? new Date(filters.asOfDate) : new Date();
+  const [cohorts, students, refundRequests, roiStats, ledgers] = await Promise.all([
     prisma.cohort.findMany({
       orderBy: { startDate: "asc" }
     }),
     prisma.student.findMany({
+      where: getScopedStudentWhere(scope),
       include: {
         salesOwner: true,
         deliveryOwner: true,
@@ -641,7 +1007,10 @@ export async function getAnalyticsData() {
       }
     }),
     prisma.refundRequest.findMany({
+      where: getScopedRefundWhere(scope),
       include: {
+        createdBy: true,
+        currentHandler: true,
         student: {
           include: {
             salesOwner: true,
@@ -656,21 +1025,54 @@ export async function getAnalyticsData() {
             }
           }
         },
-        approvals: true
+        approvals: {
+          include: {
+            approver: true
+          }
+        }
       }
     }),
     prisma.roiPeriodStat.findMany({
       include: { cohort: true }
+    }),
+    prisma.revenueLedger.findMany({
+      where: {
+        ...getScopedRevenueLedgerWhere(scope),
+        ...(mode === "AS_OF_DATE"
+          ? {
+              occurredAt: {
+                lte: asOfDate
+              }
+            }
+          : {})
+      }
     })
   ]);
+
+  const visibleLedgers =
+    mode === "NET_CASH"
+      ? ledgers.filter(
+          (item) =>
+            item.ledgerType === RevenueLedgerType.SEAT_CARD_RECEIPT ||
+            item.ledgerType === RevenueLedgerType.FINAL_PAYMENT_RECEIPT ||
+            item.ledgerType === RevenueLedgerType.REFUND_OUTFLOW
+        )
+      : ledgers;
 
   const bySales = Object.values(
     students.reduce<Record<string, { name: string; grossRevenue: number; refundAmount: number; formalCount: number; refundCount: number }>>((acc, student) => {
       const key = student.salesOwner?.id ?? "unassigned";
       const name = student.salesOwner?.name ?? "未分配销售";
       const refunds = refundRequests.filter((item) => item.student.salesOwnerId === student.salesOwnerId);
-      const latestEnrollment = student.enrollments[0];
-      const grossRevenue = latestEnrollment ? latestEnrollment.totalReceived : 0;
+      const grossRevenue = visibleLedgers
+        .filter(
+          (item) =>
+            item.studentId === student.id &&
+            (item.ledgerType === RevenueLedgerType.SEAT_CARD_RECEIPT ||
+              item.ledgerType === RevenueLedgerType.FINAL_PAYMENT_RECEIPT ||
+              item.ledgerType === RevenueLedgerType.RECOGNIZED_REVENUE)
+        )
+        .reduce((sum, item) => sum + item.amount, 0);
 
       if (!acc[key]) {
         acc[key] = {
@@ -736,15 +1138,68 @@ export async function getAnalyticsData() {
     }, {})
   );
 
+  const byResponsibility = Object.values(
+    refundRequests.reduce<
+      Record<string, { name: string; role: string; handled: number; approved: number; refundedAmount: number }>
+    >((acc, request) => {
+      const actors = [
+        request.createdBy ? { key: `created-${request.createdBy.id}`, name: request.createdBy.name, role: "发起退款" } : null,
+        request.currentHandler ? { key: `handle-${request.currentHandler.id}`, name: request.currentHandler.name, role: "当前处理人" } : null,
+        ...request.approvals.map((approval) => ({
+          key: `approval-${approval.approver.id}`,
+          name: approval.approver.name,
+          role: "审批人",
+          approved: approval.decision === RefundApprovalDecision.APPROVED ? 1 : 0
+        }))
+      ].filter(Boolean) as Array<{ key: string; name: string; role: string; approved?: number }>;
+
+      for (const actor of actors) {
+        if (!acc[actor.key]) {
+          acc[actor.key] = {
+            name: actor.name,
+            role: actor.role,
+            handled: 0,
+            approved: 0,
+            refundedAmount: 0
+          };
+        }
+        acc[actor.key].handled += 1;
+        acc[actor.key].approved += actor.approved ?? 0;
+        acc[actor.key].refundedAmount += request.refundedAmount;
+      }
+
+      return acc;
+    }, {})
+  );
+
   const byCohort = cohorts.map((cohort) => {
     const stat = roiStats.find((item) => item.cohortId === cohort.id);
+    const cohortGrossRevenue = visibleLedgers
+      .filter(
+        (item) =>
+          item.cohortId === cohort.id &&
+          (mode === "NET_CASH"
+            ? item.ledgerType === RevenueLedgerType.SEAT_CARD_RECEIPT ||
+              item.ledgerType === RevenueLedgerType.FINAL_PAYMENT_RECEIPT
+            : item.ledgerType === RevenueLedgerType.SEAT_CARD_RECEIPT ||
+              item.ledgerType === RevenueLedgerType.FINAL_PAYMENT_RECEIPT ||
+              item.ledgerType === RevenueLedgerType.RECOGNIZED_REVENUE)
+      )
+      .reduce((sum, item) => sum + item.amount, 0);
+    const cohortRefundAmount = visibleLedgers
+      .filter((item) => item.cohortId === cohort.id && item.ledgerType === RevenueLedgerType.REFUND_OUTFLOW)
+      .reduce((sum, item) => sum + item.amount, 0);
+    const cohortNetRevenue = cohortGrossRevenue - cohortRefundAmount;
+    const grossRoi = cohort.adSpend > 0 ? cohortGrossRevenue / cohort.adSpend : 0;
+    const netRoi = cohort.adSpend > 0 ? cohortNetRevenue / cohort.adSpend : 0;
+
     return {
       cohort: cohort.code,
-      grossRevenue: stat?.grossRevenue ?? 0,
-      netRevenue: stat?.netRevenue ?? 0,
-      grossRoi: stat?.grossRoi ?? 0,
-      netRoi: stat?.netRoi ?? 0,
-      refundAmount: stat?.refundAmount ?? 0
+      grossRevenue: cohortGrossRevenue || stat?.grossRevenue || 0,
+      netRevenue: cohortNetRevenue || stat?.netRevenue || 0,
+      grossRoi: grossRoi || stat?.grossRoi || 0,
+      netRoi: netRoi || stat?.netRoi || 0,
+      refundAmount: cohortRefundAmount || stat?.refundAmount || 0
     };
   });
 
@@ -754,6 +1209,10 @@ export async function getAnalyticsData() {
     byDelivery,
     byStage,
     byReason,
+    byResponsibility,
+    mode,
+    asOfDate: asOfDate.toISOString(),
+    scopeLabel: scope.scopeLabel,
     helpers: {
       studentStatusLabelMap,
       riskLevelLabelMap,
@@ -765,4 +1224,30 @@ export async function getAnalyticsData() {
       }
     }
   };
+}
+
+export async function getMarketingCollaborationRows(scope: DataScope = globalScope) {
+  await ensureDatabaseReady();
+  return prisma.lead.findMany({
+    where: getScopedLeadWhere(scope),
+    include: {
+      sourceOwner: true,
+      currentAssignee: true,
+      student: {
+        include: {
+          cohort: true,
+          salesOwner: true,
+          deliveryOwner: true,
+          enrollments: {
+            orderBy: { createdAt: "desc" },
+            take: 1,
+            include: {
+              tailPaymentOwner: true
+            }
+          }
+        }
+      }
+    },
+    orderBy: [{ sourceTime: "desc" }]
+  });
 }

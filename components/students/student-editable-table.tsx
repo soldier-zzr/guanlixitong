@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { startTransition, useMemo, useState } from "react";
 import { RiskBadge, StageBadge, StudentStatusBadge } from "@/components/status-badge";
-import { studentStatusLabelMap } from "@/lib/server/config";
+import { studentManualEditableStatuses, studentStatusLabelMap } from "@/lib/server/config";
 import { formatDateOnly, formatUserOptionLabel } from "@/lib/utils";
 
 type UserOption = {
@@ -45,17 +45,6 @@ type StudentRow = {
   }>;
 };
 
-const salesEditableStatuses: StudentStatus[] = [
-  StudentStatus.LOW_PRICE_PURCHASED,
-  StudentStatus.WECHAT_ADDED,
-  StudentStatus.IN_GROUP_LEARNING,
-  StudentStatus.SEAT_CARD_PAID,
-  StudentStatus.FINAL_PAYMENT_PENDING,
-  StudentStatus.FORMALLY_ENROLLED,
-  StudentStatus.PRE_START_OBSERVING,
-  StudentStatus.REFUND_WARNING
-];
-
 function getEnrollmentSnapshot(status: StudentStatus) {
   const seatCardStatuses: StudentStatus[] = [
     StudentStatus.SEAT_CARD_PAID,
@@ -89,9 +78,16 @@ export function StudentEditableTable(props: {
   students: StudentRow[];
   users: UserOption[];
   cohorts: CohortOption[];
+  permissions: {
+    canEditSales: boolean;
+    canEditDelivery: boolean;
+    canBulkEdit: boolean;
+  };
 }) {
   const router = useRouter();
-  const salesUsers = props.users.filter((item) => item.role === "SALES");
+  const salesUsers = props.users.filter(
+    (item) => item.title === "SALES" || item.title === "PRIVATE_OPS"
+  );
   const deliveryUsers = props.users.filter((item) => item.role === "DELIVERY");
   const [rows, setRows] = useState(
     props.students.map((student) => ({
@@ -127,6 +123,11 @@ export function StudentEditableTable(props: {
   }
 
   async function saveRow(id: string) {
+    if (!props.permissions.canEditSales && !props.permissions.canEditDelivery) {
+      window.alert("当前岗位没有学员编辑权限");
+      return;
+    }
+
     const row = rowMap[id];
     if (!row) {
       return;
@@ -158,6 +159,11 @@ export function StudentEditableTable(props: {
   }
 
   async function applyBulkEdit() {
+    if (!props.permissions.canBulkEdit) {
+      window.alert("当前岗位没有批量修改权限");
+      return;
+    }
+
     if (selectedIds.length === 0) {
       window.alert("请先选择学员");
       return;
@@ -204,7 +210,9 @@ export function StudentEditableTable(props: {
           <div>
             <div className="text-sm font-semibold text-slate-900">批量销售操作</div>
             <p className="mt-1 text-xs text-slate-500">
-              勾选多条学员后，可统一挂营期、改负责人或推进报课状态。
+              {props.permissions.canBulkEdit
+                ? "勾选多条学员后，可统一挂营期、改负责人或推进报课状态。"
+                : "当前岗位为只读视角，不能批量修改学员。"}
             </p>
           </div>
           <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
@@ -214,11 +222,12 @@ export function StudentEditableTable(props: {
         <div className="mt-4 grid gap-3 xl:grid-cols-4">
           <select
             className="field"
+            disabled={!props.permissions.canBulkEdit}
             value={bulkForm.status}
             onChange={(event) => setBulkForm((current) => ({ ...current, status: event.target.value }))}
           >
             <option value="">批量改状态</option>
-            {salesEditableStatuses.map((status) => (
+            {studentManualEditableStatuses.map((status) => (
               <option key={status} value={status}>
                 {studentStatusLabelMap[status]}
               </option>
@@ -226,6 +235,7 @@ export function StudentEditableTable(props: {
           </select>
           <select
             className="field"
+            disabled={!props.permissions.canBulkEdit}
             value={bulkForm.cohortId}
             onChange={(event) => setBulkForm((current) => ({ ...current, cohortId: event.target.value }))}
           >
@@ -238,6 +248,7 @@ export function StudentEditableTable(props: {
           </select>
           <select
             className="field"
+            disabled={!props.permissions.canBulkEdit}
             value={bulkForm.salesOwnerId}
             onChange={(event) =>
               setBulkForm((current) => ({ ...current, salesOwnerId: event.target.value }))
@@ -253,6 +264,7 @@ export function StudentEditableTable(props: {
           <div className="flex gap-3">
             <select
               className="field"
+              disabled={!props.permissions.canBulkEdit}
               value={bulkForm.deliveryOwnerId}
               onChange={(event) =>
                 setBulkForm((current) => ({ ...current, deliveryOwnerId: event.target.value }))
@@ -265,7 +277,12 @@ export function StudentEditableTable(props: {
                 </option>
               ))}
             </select>
-            <button className="btn-primary shrink-0 px-5" onClick={applyBulkEdit} type="button">
+            <button
+              className="btn-primary shrink-0 px-5 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={!props.permissions.canBulkEdit}
+              onClick={applyBulkEdit}
+              type="button"
+            >
               应用
             </button>
           </div>
@@ -273,7 +290,7 @@ export function StudentEditableTable(props: {
       </div>
 
       <div className="table-shell overflow-x-auto">
-        <table className="min-w-[1680px]">
+        <table className="min-w-[1720px]">
           <thead>
             <tr>
               <th className="w-12">
@@ -286,20 +303,20 @@ export function StudentEditableTable(props: {
                   type="checkbox"
                 />
               </th>
-              <th>学员</th>
-              <th>手机号</th>
-              <th>是否报课</th>
-              <th>成交状态</th>
-              <th>营期</th>
-              <th>赛道</th>
-              <th>销售</th>
-              <th>交付</th>
-              <th>风险</th>
-              <th>阶段</th>
-              <th>低价课购买</th>
-              <th>销售备注</th>
-              <th>退款进展</th>
-              <th>操作</th>
+              <th className="whitespace-nowrap">学员</th>
+              <th className="whitespace-nowrap">手机号</th>
+              <th className="whitespace-nowrap">报课</th>
+              <th className="whitespace-nowrap">成交状态</th>
+              <th className="whitespace-nowrap">营期</th>
+              <th className="whitespace-nowrap">赛道</th>
+              <th className="whitespace-nowrap">销售</th>
+              <th className="whitespace-nowrap">交付</th>
+              <th className="whitespace-nowrap">风险</th>
+              <th className="whitespace-nowrap">阶段</th>
+              <th className="whitespace-nowrap">低价课购买</th>
+              <th className="whitespace-nowrap">销售备注</th>
+              <th className="whitespace-nowrap">退款进展</th>
+              <th className="whitespace-nowrap">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -318,29 +335,31 @@ export function StudentEditableTable(props: {
                     />
                   </td>
                   <td>
-                    <div className="min-w-[160px] space-y-2">
-                      <Link
-                        className="font-semibold text-brand-700 transition hover:text-brand-800"
-                        href={`/students/${student.id}`}
-                      >
-                        查看详情
-                      </Link>
+                    <div className="min-w-[164px] space-y-2">
                       <input
+                        disabled={!props.permissions.canEditSales}
                         className="field h-10 rounded-xl px-3"
                         value={row.name}
                         onChange={(event) => updateRow(student.id, { name: event.target.value })}
                       />
+                      <Link
+                        className="inline-flex text-xs font-semibold text-brand-700 transition hover:text-brand-800"
+                        href={`/students/${student.id}`}
+                      >
+                        查看详情
+                      </Link>
                     </div>
                   </td>
                   <td>
                     <input
-                      className="field h-10 min-w-[160px] rounded-xl px-3"
+                      disabled={!props.permissions.canEditSales}
+                      className="field h-10 min-w-[150px] rounded-xl px-3"
                       value={row.phone}
                       onChange={(event) => updateRow(student.id, { phone: event.target.value })}
                     />
                   </td>
                   <td>
-                    <span className="inline-flex rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
+                    <span className="inline-flex min-w-[72px] justify-center rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700 whitespace-nowrap">
                       {getEnrollmentSnapshot(row.status)}
                     </span>
                   </td>
@@ -348,6 +367,7 @@ export function StudentEditableTable(props: {
                     <div className="min-w-[190px] space-y-2">
                       <StudentStatusBadge status={row.status} />
                       <select
+                        disabled={!props.permissions.canEditSales}
                         className="field h-10 rounded-xl px-3"
                         value={row.status}
                         onChange={(event) =>
@@ -356,7 +376,7 @@ export function StudentEditableTable(props: {
                           })
                         }
                       >
-                        {salesEditableStatuses.map((status) => (
+                        {studentManualEditableStatuses.map((status) => (
                           <option key={status} value={status}>
                             {studentStatusLabelMap[status]}
                           </option>
@@ -365,9 +385,9 @@ export function StudentEditableTable(props: {
                     </div>
                   </td>
                   <td>
-                    <div className="min-w-[180px] space-y-2">
-                      <div className="text-xs text-slate-500">{student.cohort?.code ?? "未分配"}</div>
+                    <div className="min-w-[180px]">
                       <select
+                        disabled={!props.permissions.canEditSales}
                         className="field h-10 rounded-xl px-3"
                         value={row.cohortId}
                         onChange={(event) =>
@@ -387,6 +407,7 @@ export function StudentEditableTable(props: {
                   </td>
                   <td>
                     <input
+                      disabled={!props.permissions.canEditSales}
                       className="field h-10 min-w-[180px] rounded-xl px-3"
                       placeholder="赛道"
                       value={row.trackLane}
@@ -398,9 +419,9 @@ export function StudentEditableTable(props: {
                     />
                   </td>
                   <td>
-                    <div className="min-w-[180px] space-y-2">
-                      <div className="text-xs text-slate-500">{student.salesOwner?.name ?? "未分配销售"}</div>
+                    <div className="min-w-[180px]">
                       <select
+                        disabled={!props.permissions.canEditSales}
                         className="field h-10 rounded-xl px-3"
                         value={row.salesOwnerId}
                         onChange={(event) =>
@@ -419,11 +440,9 @@ export function StudentEditableTable(props: {
                     </div>
                   </td>
                   <td>
-                    <div className="min-w-[180px] space-y-2">
-                      <div className="text-xs text-slate-500">
-                        {student.deliveryOwner?.name ?? "未分配交付"}
-                      </div>
+                    <div className="min-w-[180px]">
                       <select
+                        disabled={!props.permissions.canEditDelivery}
                         className="field h-10 rounded-xl px-3"
                         value={row.deliveryOwnerId}
                         onChange={(event) =>
@@ -442,14 +461,19 @@ export function StudentEditableTable(props: {
                     </div>
                   </td>
                   <td>
-                    <RiskBadge level={student.riskLevel} />
+                    <div className="min-w-[92px]">
+                      <RiskBadge level={student.riskLevel} />
+                    </div>
                   </td>
                   <td>
-                    <StageBadge stage={student.currentStage} />
+                    <div className="min-w-[112px]">
+                      <StageBadge stage={student.currentStage} />
+                    </div>
                   </td>
                   <td>{formatDateOnly(student.lowPricePurchaseAt)}</td>
                   <td>
                     <textarea
+                      disabled={!props.permissions.canEditSales}
                       className="field min-h-[92px] min-w-[240px] rounded-2xl px-3 py-3"
                       placeholder="记录报课进度、异议点、跟进结果"
                       value={row.intentNote}
@@ -473,7 +497,10 @@ export function StudentEditableTable(props: {
                   <td>
                     <button
                       className="btn-primary h-10 rounded-xl px-4"
-                      disabled={savingId === student.id}
+                      disabled={
+                        savingId === student.id ||
+                        (!props.permissions.canEditSales && !props.permissions.canEditDelivery)
+                      }
                       onClick={() => saveRow(student.id)}
                       type="button"
                     >

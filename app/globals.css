@@ -12,6 +12,7 @@
 
 html {
   min-height: 100%;
+  -webkit-text-size-adjust: 100%;
   background:
     radial-gradient(circle at top left, rgba(46, 108, 246, 0.1), transparent 30%),
     radial-gradient(circle at top right, rgba(245, 123, 21, 0.08), transparent 24%),
@@ -70,11 +71,11 @@ button {
 }
 
 .table-shell {
-  @apply overflow-hidden rounded-3xl border border-slate-200/80 bg-white/90 shadow-soft;
+  @apply overflow-x-auto overflow-y-hidden rounded-3xl border border-slate-200/80 bg-white/90 shadow-soft;
 }
 
 .table-shell table {
-  @apply min-w-full border-collapse;
+  @apply min-w-[980px] w-full border-collapse;
 }
 
 .table-shell th {

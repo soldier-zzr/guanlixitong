@@ -3,6 +3,8 @@ import { existsSync } from "node:fs";
 import * as XLSX from "xlsx";
 import {
   AssignmentResult,
+  AuditActionType,
+  AuditEntityType,
   EnrollmentStage,
   FunnelEventType,
   LeadStatus,
@@ -14,6 +16,11 @@ import {
   UserRole
 } from "@prisma/client";
 import { prisma } from "@/lib/server/db";
+import {
+  createAuditLog,
+  upsertRevenueLedgerEntriesForEnrollment,
+  upsertRevenueLedgerEntryForRefund
+} from "@/lib/server/recompute";
 
 function normalizePhone(value: unknown) {
   if (value === null || value === undefined || value === "") {
@@ -170,7 +177,7 @@ function buildImportedRefundRequestNo() {
   return `IMP-${randomUUID().replace(/-/g, "").slice(0, 16)}`;
 }
 
-export async function importIntakeWorkbook(filePathOrBuffer: string | Buffer) {
+export async function importIntakeWorkbook(filePathOrBuffer: string | Buffer, sourceOwnerId?: string | null) {
   if (typeof filePathOrBuffer === "string" && !existsSync(filePathOrBuffer)) {
     throw new Error(`文件不存在: ${filePathOrBuffer}`);
   }
@@ -209,44 +216,28 @@ export async function importIntakeWorkbook(filePathOrBuffer: string | Buffer) {
           ? LeadStatus.ASSIGNED
           : LeadStatus.NEW;
 
-    const existing = await prisma.lead.findUnique({
-      where: { phone }
+    const lead = await prisma.lead.create({
+      data: {
+        name: String(nickname),
+        phone,
+        sourceTime,
+        orderInfo: orderInfo || null,
+        intentLevel: payload["意向等级"] ? String(payload["意向等级"]) : "中意向",
+        qualityScore: friendStatus === "已加上" ? 75 : 58,
+        leadStatus,
+        note,
+        sourceOwnerId: sourceOwnerId ?? null,
+        currentAssigneeId: assignee?.id ?? null
+      }
     });
-
-    const lead = existing
-      ? await prisma.lead.update({
-          where: { phone },
-          data: {
-            name: String(nickname),
-            city: null,
-            sourceTime,
-            orderInfo: orderInfo || existing.orderInfo,
-            intentLevel: payload["意向等级"] ? String(payload["意向等级"]) : existing.intentLevel,
-            qualityScore: friendStatus === "已加上" ? 75 : 58,
-            leadStatus,
-            note: note || existing.note,
-            currentAssigneeId: assignee?.id ?? existing.currentAssigneeId
-          }
-        })
-      : await prisma.lead.create({
-          data: {
-            name: String(nickname),
-            phone,
-            sourceTime,
-            orderInfo: orderInfo || null,
-            intentLevel: payload["意向等级"] ? String(payload["意向等级"]) : "中意向",
-            qualityScore: friendStatus === "已加上" ? 75 : 58,
-            leadStatus,
-            note,
-            currentAssigneeId: assignee?.id ?? null
-          }
-        });
-
-    if (existing) {
-      updated += 1;
-    } else {
-      created += 1;
-    }
+    created += 1;
+    await createAuditLog({
+      entityType: AuditEntityType.LEAD,
+      entityId: lead.id,
+      action: AuditActionType.IMPORTED,
+      note: `导入前端接量表第 ${rowIndex + 1} 行`,
+      metaJson: JSON.stringify({ phone, assigneeId: assignee?.id ?? null })
+    });
 
     if (assignee) {
       const existingAssignment = await prisma.leadAssignment.findFirst({
@@ -357,8 +348,9 @@ export async function importTailWorkbook(filePathOrBuffer: string | Buffer) {
       }
     });
 
-    const linkedLead = await prisma.lead.findUnique({
-      where: { phone }
+    const linkedLead = await prisma.lead.findFirst({
+      where: { phone },
+      orderBy: { sourceTime: "desc" }
     });
 
     const student = await prisma.student.upsert({
@@ -422,7 +414,7 @@ export async function importTailWorkbook(filePathOrBuffer: string | Buffer) {
     });
 
     if (existingEnrollment) {
-      await prisma.enrollment.update({
+      const updatedEnrollment = await prisma.enrollment.update({
         where: { id: existingEnrollment.id },
         data: {
           courseVersion: "密训2.0",
@@ -446,8 +438,12 @@ export async function importTailWorkbook(filePathOrBuffer: string | Buffer) {
           note
         }
       });
+      await upsertRevenueLedgerEntriesForEnrollment({
+        enrollmentId: updatedEnrollment.id,
+        actorId: salesUser?.id ?? null
+      });
     } else {
-      await prisma.enrollment.create({
+      const createdEnrollment = await prisma.enrollment.create({
         data: {
           studentId: student.id,
           cohortId: cohort.id,
@@ -474,6 +470,10 @@ export async function importTailWorkbook(filePathOrBuffer: string | Buffer) {
                 : EnrollmentStage.FINAL_PAYMENT,
           note
         }
+      });
+      await upsertRevenueLedgerEntriesForEnrollment({
+        enrollmentId: createdEnrollment.id,
+        actorId: salesUser?.id ?? null
       });
     }
 
@@ -547,7 +547,7 @@ export async function importTailWorkbook(filePathOrBuffer: string | Buffer) {
       });
 
       if (existingRefund) {
-        await prisma.refundRequest.update({
+        const updatedRefund = await prisma.refundRequest.update({
           where: {
             id: existingRefund.id
           },
@@ -560,8 +560,12 @@ export async function importTailWorkbook(filePathOrBuffer: string | Buffer) {
             finalResult: "由 Excel 工单导入为已退款"
           }
         });
+        await upsertRevenueLedgerEntryForRefund({
+          refundRequestId: updatedRefund.id,
+          actorId: deliveryUser?.id ?? salesUser?.id ?? null
+        });
       } else {
-        await prisma.refundRequest.create({
+        const createdRefund = await prisma.refundRequest.create({
           data: {
             requestNo: buildImportedRefundRequestNo(),
             studentId: student.id,
@@ -579,6 +583,10 @@ export async function importTailWorkbook(filePathOrBuffer: string | Buffer) {
             refundedAmount: 6980,
             finalResult: "由 Excel 工单导入为已退款"
           }
+        });
+        await upsertRevenueLedgerEntryForRefund({
+          refundRequestId: createdRefund.id,
+          actorId: deliveryUser?.id ?? salesUser?.id ?? null
         });
         refundsCreated += 1;
       }

@@ -6,6 +6,7 @@ import { StudentLifecycleForm } from "@/components/forms/student-lifecycle-form"
 import { PageHeader } from "@/components/layout/page-header";
 import { SectionCard } from "@/components/section-card";
 import { LeadStatusBadge, RefundStatusBadge, RiskBadge, StageBadge, StudentStatusBadge } from "@/components/status-badge";
+import { requireCurrentActorContext } from "@/lib/server/actor";
 import { getLookupOptions, getStudentDetail } from "@/lib/server/queries";
 import { formatDateTime, formatMoney } from "@/lib/utils";
 import { refundLevelLabelMap } from "@/lib/server/config";
@@ -14,7 +15,11 @@ export default async function StudentDetailPage(props: {
   params: Promise<{ id: string }>;
 }) {
   const params = await props.params;
-  const [student, lookups] = await Promise.all([getStudentDetail(params.id), getLookupOptions()]);
+  const actorContext = await requireCurrentActorContext();
+  const [student, lookups] = await Promise.all([
+    getStudentDetail(params.id, actorContext.dataScope),
+    getLookupOptions()
+  ]);
 
   if (!student) {
     notFound();
@@ -27,7 +32,7 @@ export default async function StudentDetailPage(props: {
       <PageHeader
         eyebrow="Student Detail"
         title={`${student.name} 的完整业务链路`}
-        description="查看成交节点、风险事件、退款处理留痕和当前负责人。退款时先走销售负责人审批，转交交付后再增加交付同意节点。"
+        description={`当前为${actorContext.dataScope.scopeLabel}。查看成交节点、风险事件、退款处理留痕和当前负责人。`}
         actions={
           <Link className="btn-secondary" href="/students">
             返回学员列表
@@ -103,6 +108,9 @@ export default async function StudentDetailPage(props: {
 
         <SectionCard title="状态调整" subtitle="允许手工修正主档案、风险等级、负责人和金额。">
           <StudentLifecycleForm
+            canEditDeliveryFields={actorContext.permissions.canEditStudentDelivery}
+            canEditRiskFields={actorContext.permissions.canCreateRiskEvents}
+            canEditSalesFields={actorContext.permissions.canEditStudentSales}
             studentId={student.id}
             status={student.status}
             riskLevel={student.riskLevel}
@@ -134,7 +142,7 @@ export default async function StudentDetailPage(props: {
               </div>
               <div className="mt-4 grid gap-2 text-sm text-slate-600">
                 <p>进线时间：{formatDateTime(student.lead.sourceTime)}</p>
-                <p>投放计划：{student.lead.campaign?.name ?? "未关联"}</p>
+                <p>来源计划：{student.lead.campaign?.name ?? "未关联"}</p>
                 <p>素材：{student.lead.creative?.creativeName ?? "未关联"}</p>
                 <p>当前线索负责人：{student.lead.currentAssignee?.name ?? "未分配"}</p>
                 <p>意向等级：{student.lead.intentLevel ?? "未评估"}</p>
@@ -203,8 +211,10 @@ export default async function StudentDetailPage(props: {
 
           <div className="mt-5 rounded-3xl border border-slate-200 bg-slate-50 p-4">
             <RiskEventForm
+              canEdit={actorContext.permissions.canCreateRiskEvents}
               studentId={student.id}
               enrollmentId={enrollment?.id}
+              currentReporterId={actorContext.actor?.id ?? lookups.users[0]?.id}
               reporters={lookups.users.map((item) => ({ id: item.id, name: item.name, title: item.title }))}
             />
           </div>
@@ -276,9 +286,10 @@ export default async function StudentDetailPage(props: {
 
           <div className="mt-5 rounded-3xl border border-slate-200 bg-slate-50 p-4">
             <RefundRequestForm
+              canCreate={actorContext.permissions.canCreateRefundRequests}
               studentId={student.id}
               currentHandlerId={student.salesOwnerId}
-              createdById={student.salesOwnerId}
+              createdById={actorContext.actor?.id ?? student.salesOwnerId}
               dictionaries={lookups.dictionaries}
               actorUsers={lookups.users.map((item) => ({ id: item.id, name: item.name, title: item.title }))}
             />

@@ -1,6 +1,7 @@
 import { ImportRunner } from "@/components/forms/import-runner";
 import { PageHeader } from "@/components/layout/page-header";
 import { SectionCard } from "@/components/section-card";
+import { requireCurrentActorContext } from "@/lib/server/actor";
 import { getBackendSummaryRows } from "@/lib/server/reports";
 import { formatMoney } from "@/lib/utils";
 
@@ -12,6 +13,7 @@ const BACK_DEFAULT =
   "I:/xwechat_files/wxid_88oie3duvy0322_6668/msg/file/2026-03/营期-转化率-营收统计.xlsx";
 
 export default async function ImportsPage() {
+  await requireCurrentActorContext();
   const summaryRows = await getBackendSummaryRows();
 
   return (

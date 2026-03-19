@@ -5,6 +5,7 @@ import {
   RiskLevel,
   StudentStatus,
   RefundLevel,
+  UserRole,
   UserTitle
 } from "@prisma/client";
 
@@ -87,6 +88,27 @@ export const studentStatusLabelMap: Record<StudentStatus, string> = {
   CLOSED: "已结案"
 };
 
+export const protectedRefundStatuses: StudentStatus[] = [
+  StudentStatus.REFUND_REQUESTED,
+  StudentStatus.LEVEL1_PROCESSING,
+  StudentStatus.LEVEL2_PROCESSING,
+  StudentStatus.LEVEL3_PROCESSING,
+  StudentStatus.RETAINED,
+  StudentStatus.REFUNDED,
+  StudentStatus.CLOSED
+];
+
+export const studentManualEditableStatuses: StudentStatus[] = [
+  StudentStatus.LOW_PRICE_PURCHASED,
+  StudentStatus.WECHAT_ADDED,
+  StudentStatus.IN_GROUP_LEARNING,
+  StudentStatus.SEAT_CARD_PAID,
+  StudentStatus.FINAL_PAYMENT_PENDING,
+  StudentStatus.FORMALLY_ENROLLED,
+  StudentStatus.PRE_START_OBSERVING,
+  StudentStatus.REFUND_WARNING
+];
+
 export const riskLevelLabelMap: Record<RiskLevel, string> = {
   A: "A 低风险",
   B: "B 中风险",
@@ -112,6 +134,7 @@ export const refundLevelLabelMap: Record<RefundLevel, string> = {
 
 export const userTitleLabelMap: Record<UserTitle, string> = {
   ADMIN: "管理员",
+  MARKETING: "投放",
   SALES_MANAGER: "销售负责人",
   SALES: "销售",
   PRIVATE_OPS: "私域运营",
@@ -119,6 +142,25 @@ export const userTitleLabelMap: Record<UserTitle, string> = {
   DELIVERY_OPS: "交付运营",
   DELIVERY_SUPERVISOR: "交付主管"
 };
+
+export function deriveUserRoleFromTitle(title: UserTitle) {
+  switch (title) {
+    case UserTitle.ADMIN:
+      return UserRole.ADMIN;
+    case UserTitle.MARKETING:
+      return UserRole.SALES;
+    case UserTitle.SALES_MANAGER:
+    case UserTitle.PRIVATE_SUPERVISOR:
+    case UserTitle.DELIVERY_SUPERVISOR:
+      return UserRole.SUPERVISOR;
+    case UserTitle.DELIVERY_OPS:
+      return UserRole.DELIVERY;
+    case UserTitle.SALES:
+    case UserTitle.PRIVATE_OPS:
+    default:
+      return UserRole.SALES;
+  }
+}
 
 export const leadStatusLabelMap: Record<LeadStatus, string> = {
   NEW: "新进线索",

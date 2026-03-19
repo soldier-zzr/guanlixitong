@@ -12,18 +12,20 @@ import { FunnelStageChart, RefundTrendChart, RevenueCompareChart, RiskDistributi
 import { KpiCard } from "@/components/kpi-card";
 import { PageHeader } from "@/components/layout/page-header";
 import { SectionCard } from "@/components/section-card";
+import { requireCurrentActorContext } from "@/lib/server/actor";
 import { getDashboardData } from "@/lib/server/queries";
 import { formatMoney, formatPercent } from "@/lib/utils";
 
 export default async function DashboardPage() {
-  const data = await getDashboardData();
+  const { dataScope } = await requireCurrentActorContext();
+  const data = await getDashboardData(dataScope);
 
   return (
     <div className="space-y-6 py-4">
       <PageHeader
-        eyebrow="Dashboard"
-        title="退款风控与晚退费经营总览"
-        description="围绕密训 2.0 的招生、风险、退款、净收入和期次经营质量建立统一视图。这里优先展示挽回压力、净 ROI 变化和需要管理动作的异常。"
+        eyebrow="Overview"
+        title="学员经营总览"
+        description={`当前为${data.scopeLabel}。围绕线索承接、报课转化、退款审批、净收入和期次质量建立统一视图。`}
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -43,8 +45,8 @@ export default async function DashboardPage() {
       <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
         <KpiCard label="毛收入" value={formatMoney(data.summary.grossRevenue)} hint="占位卡 + 尾款总额" tone="dark" icon={<CircleDollarSign className="h-5 w-5" />} />
         <KpiCard label="净收入" value={formatMoney(data.summary.netRevenue)} hint={`已退款 ${formatMoney(data.summary.refundAmount)}`} tone="dark" icon={<CircleDollarSign className="h-5 w-5" />} />
-        <KpiCard label="毛 ROI" value={formatPercent(data.summary.grossRoi)} hint="毛收入 / 投放金额" tone="dark" icon={<AlertTriangle className="h-5 w-5" />} />
-        <KpiCard label="净 ROI" value={formatPercent(data.summary.netRoi)} hint="净收入 / 投放金额" tone="dark" icon={<AlertTriangle className="h-5 w-5" />} />
+        <KpiCard label="毛 ROI" value={formatPercent(data.summary.grossRoi)} hint="毛收入 / 成本金额" tone="dark" icon={<AlertTriangle className="h-5 w-5" />} />
+        <KpiCard label="净 ROI" value={formatPercent(data.summary.netRoi)} hint="净收入 / 成本金额" tone="dark" icon={<AlertTriangle className="h-5 w-5" />} />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1.4fr,1fr]">
@@ -78,7 +80,7 @@ export default async function DashboardPage() {
 
         <SectionCard
           title="前链路关注点"
-          subtitle="当前前端经营侧最需要盯的异常。"
+          subtitle="当前最需要优先盯住的异常。"
         >
           <div className="space-y-3">
             <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">

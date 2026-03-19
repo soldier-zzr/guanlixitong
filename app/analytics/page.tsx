@@ -2,19 +2,52 @@ import { HorizontalBarList } from "@/components/charts/analytics-charts";
 import { RevenueCompareChart } from "@/components/charts/dashboard-charts";
 import { PageHeader } from "@/components/layout/page-header";
 import { SectionCard } from "@/components/section-card";
+import { requireCurrentActorContext } from "@/lib/server/actor";
 import { getAnalyticsData } from "@/lib/server/queries";
-import { formatMoney, formatPercent } from "@/lib/utils";
+import { formatDateOnly, formatMoney, formatPercent } from "@/lib/utils";
 
-export default async function AnalyticsPage() {
-  const data = await getAnalyticsData();
+export default async function AnalyticsPage(props: {
+  searchParams?: Promise<{
+    mode?: "COHORT" | "AS_OF_DATE" | "NET_CASH";
+    asOfDate?: string;
+  }>;
+}) {
+  const searchParams = (await props.searchParams) ?? {};
+  const { dataScope } = await requireCurrentActorContext();
+  const data = await getAnalyticsData(dataScope, {
+    mode: searchParams.mode ?? "COHORT",
+    asOfDate: searchParams.asOfDate
+  });
 
   return (
     <div className="space-y-6 py-4">
       <PageHeader
         eyebrow="Analytics"
         title="ROI / 净收入 / 退款归因分析"
-        description="按期次、销售、交付、阶段、退款原因拆解退款对经营的真实影响，直接服务复盘与责任定位。"
+        description={`当前为${data.scopeLabel}。按口径、期次、销售、交付、责任链拆解退款对经营的真实影响。`}
       />
+
+      <SectionCard title="统计口径" subtitle="切换营期口径、截止日期口径、预收净收口径。">
+        <form className="grid gap-4 md:grid-cols-[1fr,1fr,auto]" method="get">
+          <div>
+            <label className="field-label">口径</label>
+            <select className="field" defaultValue={data.mode} name="mode">
+              <option value="COHORT">营期口径</option>
+              <option value="AS_OF_DATE">截止日期口径</option>
+              <option value="NET_CASH">预收/净收口径</option>
+            </select>
+          </div>
+          <div>
+            <label className="field-label">截止日期</label>
+            <input className="field" defaultValue={formatDateOnly(searchParams.asOfDate ?? data.asOfDate)} name="asOfDate" type="date" />
+          </div>
+          <div className="flex items-end">
+            <button className="btn-primary w-full md:w-auto" type="submit">
+              应用口径
+            </button>
+          </div>
+        </form>
+      </SectionCard>
 
       <SectionCard title="按期次 ROI" subtitle="同时观察毛收入、净收入、毛 ROI、净 ROI。">
         <div className="grid gap-6 xl:grid-cols-[1.1fr,0.9fr]">
@@ -97,6 +130,18 @@ export default async function AnalyticsPage() {
           />
         </SectionCard>
       </div>
+
+      <SectionCard title="责任链分析" subtitle="识别谁成交、谁处理、谁审批，退款金额最终压在哪条责任链上。">
+        <HorizontalBarList
+          data={data.byResponsibility.map((item) => ({
+            person: `${item.name} · ${item.role}`,
+            refundedAmount: item.refundedAmount
+          }))}
+          xKey="refundedAmount"
+          yKey="person"
+          color="#7C3AED"
+        />
+      </SectionCard>
     </div>
   );
 }

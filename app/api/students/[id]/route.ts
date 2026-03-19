@@ -1,14 +1,20 @@
-import { PaymentStatus, RefundStatus, StudentStatus } from "@prisma/client";
+import { AuditActionType, AuditEntityType, PaymentStatus, RefundStatus, StudentStatus } from "@prisma/client";
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/server/db";
+import { getCurrentActorContext } from "@/lib/server/actor";
+import { protectedRefundStatuses, studentManualEditableStatuses } from "@/lib/server/config";
+import { ensureDatabaseReady, prisma } from "@/lib/server/db";
 import { getStudentDetail } from "@/lib/server/queries";
 import {
+  createAuditLog,
   deriveStageFromEnrollment,
   deriveStageFromStudentStatus,
   recalculateCohortStats
+  ,
+  upsertRevenueLedgerEntriesForEnrollment
 } from "@/lib/server/recompute";
 
 export async function GET(_: Request, context: { params: Promise<{ id: string }> }) {
+  await ensureDatabaseReady();
   const { id } = await context.params;
   const student = await getStudentDetail(id);
 
@@ -20,8 +26,19 @@ export async function GET(_: Request, context: { params: Promise<{ id: string }>
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  await ensureDatabaseReady();
+  const { actor, permissions } = await getCurrentActorContext();
+  if (
+    !permissions.canEditStudentSales &&
+    !permissions.canEditStudentDelivery &&
+    !permissions.canCreateRiskEvents
+  ) {
+    return NextResponse.json({ message: "当前岗位没有修改学员权限" }, { status: 403 });
+  }
+
   const { id } = await context.params;
   const body = await request.json();
+  const nextStatus = body.status as StudentStatus | undefined;
   const normalizedCohortId = body.cohortId === "" ? null : body.cohortId;
   const normalizedSalesOwnerId = body.salesOwnerId === "" ? null : body.salesOwnerId;
   const normalizedDeliveryOwnerId = body.deliveryOwnerId === "" ? null : body.deliveryOwnerId;
@@ -40,9 +57,27 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     return NextResponse.json({ message: "学员不存在" }, { status: 404 });
   }
 
+  if (nextStatus && !studentManualEditableStatuses.includes(nextStatus)) {
+    return NextResponse.json(
+      { message: "退款流程状态只能通过退款工作台推进，学员主档不能直接修改" },
+      { status: 400 }
+    );
+  }
+
+  if (
+    nextStatus &&
+    protectedRefundStatuses.includes(student.status) &&
+    nextStatus !== student.status
+  ) {
+    return NextResponse.json(
+      { message: "当前学员已进入退款流程，需在退款工作台中处理状态变更" },
+      { status: 400 }
+    );
+  }
+
   const latestEnrollment = student.enrollments[0];
 
-  if (body.phone && body.phone !== student.phone) {
+  if (permissions.canEditStudentSales && body.phone && body.phone !== student.phone) {
     const duplicatedStudent = await prisma.student.findUnique({
       where: { phone: body.phone },
       select: { id: true }
@@ -56,24 +91,41 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   await prisma.student.update({
     where: { id },
     data: {
-      name: body.name ?? undefined,
-      phone: body.phone ?? undefined,
-      status: body.status ?? undefined,
-      currentStage: body.status ? deriveStageFromStudentStatus(body.status as StudentStatus) : undefined,
-      riskLevel: body.riskLevel ?? undefined,
-      salesOwnerId: normalizedSalesOwnerId,
-      deliveryOwnerId: normalizedDeliveryOwnerId,
-      cohortId: normalizedCohortId,
-      intentNote: body.intentNote ?? undefined,
-      trackLane: body.trackLane ?? undefined,
-      tags: body.tags ?? undefined
+      name: permissions.canEditStudentSales ? body.name ?? undefined : undefined,
+      phone: permissions.canEditStudentSales ? body.phone ?? undefined : undefined,
+      status: permissions.canEditStudentSales ? nextStatus ?? undefined : undefined,
+      currentStage:
+        permissions.canEditStudentSales && nextStatus
+          ? deriveStageFromStudentStatus(nextStatus)
+          : undefined,
+      riskLevel: permissions.canCreateRiskEvents ? body.riskLevel ?? undefined : undefined,
+      salesOwnerId:
+        permissions.canEditStudentSales && body.salesOwnerId !== undefined
+          ? normalizedSalesOwnerId
+          : undefined,
+      deliveryOwnerId:
+        permissions.canEditStudentDelivery && body.deliveryOwnerId !== undefined
+          ? normalizedDeliveryOwnerId
+          : undefined,
+      cohortId:
+        permissions.canEditStudentSales && body.cohortId !== undefined ? normalizedCohortId : undefined,
+      intentNote:
+        permissions.canEditStudentSales || permissions.canEditStudentDelivery
+          ? body.intentNote ?? undefined
+          : undefined,
+      trackLane: permissions.canEditStudentSales ? body.trackLane ?? undefined : undefined,
+      tags: permissions.canEditStudentSales ? body.tags ?? undefined : undefined
     }
   });
 
   if (latestEnrollment && body.enrollment) {
-    const seatCardAmount = Number(body.enrollment.seatCardAmount ?? latestEnrollment.seatCardAmount);
+    const seatCardAmount = permissions.canEditStudentSales
+      ? Number(body.enrollment.seatCardAmount ?? latestEnrollment.seatCardAmount)
+      : latestEnrollment.seatCardAmount;
     const finalPaymentAmount = Number(
-      body.enrollment.finalPaymentAmount ?? latestEnrollment.finalPaymentAmount
+      permissions.canEditStudentSales
+        ? body.enrollment.finalPaymentAmount ?? latestEnrollment.finalPaymentAmount
+        : latestEnrollment.finalPaymentAmount
     );
     const seatCardStatus =
       seatCardAmount > 0
@@ -103,13 +155,21 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         observationStartedAt: body.enrollment.observationStartedAt
           ? new Date(body.enrollment.observationStartedAt)
           : latestEnrollment.observationStartedAt,
-        leadSourceLabel: body.enrollment.leadSourceLabel ?? latestEnrollment.leadSourceLabel,
+        leadSourceLabel: permissions.canEditStudentDelivery
+          ? body.enrollment.leadSourceLabel ?? latestEnrollment.leadSourceLabel
+          : latestEnrollment.leadSourceLabel,
         tailPaymentOwnerId:
-          body.enrollment.tailPaymentOwnerId === ""
-            ? null
-            : body.enrollment.tailPaymentOwnerId ?? latestEnrollment.tailPaymentOwnerId,
-        handoffToDeliveryAt: body.enrollment.handoffToDeliveryAt
-          ? new Date(body.enrollment.handoffToDeliveryAt)
+          permissions.canEditStudentDelivery
+            ? body.enrollment.tailPaymentOwnerId === ""
+              ? null
+              : body.enrollment.tailPaymentOwnerId ?? latestEnrollment.tailPaymentOwnerId
+            : latestEnrollment.tailPaymentOwnerId,
+        handoffToDeliveryAt: permissions.canEditStudentDelivery
+          ? body.enrollment.handoffToDeliveryAt
+            ? new Date(body.enrollment.handoffToDeliveryAt)
+            : body.enrollment.handoffToDeliveryAt === null
+              ? null
+              : latestEnrollment.handoffToDeliveryAt
           : latestEnrollment.handoffToDeliveryAt,
         totalReceived: seatCardAmount + finalPaymentAmount,
         currentStage: deriveStageFromEnrollment({
@@ -132,30 +192,43 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       data: {
         currentStage: updatedEnrollment.currentStage,
         status:
-          body.status ??
-          (updatedEnrollment.finalPaymentStatus === PaymentStatus.PAID
-            ? StudentStatus.FORMALLY_ENROLLED
-            : updatedEnrollment.seatCardStatus === PaymentStatus.PAID
-              ? StudentStatus.FINAL_PAYMENT_PENDING
-              : student.status)
+          permissions.canEditStudentSales
+            ? nextStatus ??
+              (updatedEnrollment.finalPaymentStatus === PaymentStatus.PAID
+                ? StudentStatus.FORMALLY_ENROLLED
+                : updatedEnrollment.seatCardStatus === PaymentStatus.PAID
+                  ? StudentStatus.FINAL_PAYMENT_PENDING
+                  : student.status)
+            : student.status
       }
+    });
+    await upsertRevenueLedgerEntriesForEnrollment({
+      enrollmentId: latestEnrollment.id,
+      actorId: actor?.id ?? null
     });
   }
 
-  if ((body.status as StudentStatus | undefined) === StudentStatus.REFUNDED) {
-    const refundRequest = await prisma.refundRequest.findFirst({
-      where: { studentId: id, status: { not: RefundStatus.REFUNDED } },
-      orderBy: { requestedAt: "desc" }
-    });
+  const changedFields = [
+    ["name", student.name, body.name],
+    ["phone", student.phone, body.phone],
+    ["status", student.status, nextStatus],
+    ["cohortId", student.cohortId, normalizedCohortId],
+    ["salesOwnerId", student.salesOwnerId, normalizedSalesOwnerId],
+    ["deliveryOwnerId", student.deliveryOwnerId, normalizedDeliveryOwnerId],
+    ["trackLane", student.trackLane, body.trackLane],
+    ["intentNote", student.intentNote, body.intentNote]
+  ].filter(([, from, to]) => to !== undefined && `${from ?? ""}` !== `${to ?? ""}`);
 
-    if (refundRequest) {
-      await prisma.refundRequest.update({
-        where: { id: refundRequest.id },
-        data: {
-          status: RefundStatus.REFUNDED
-        }
-      });
-    }
+  for (const [fieldName, fromValue, toValue] of changedFields) {
+    await createAuditLog({
+      actorId: actor?.id ?? null,
+      entityType: AuditEntityType.STUDENT,
+      entityId: id,
+      action: fieldName === "status" ? AuditActionType.STATUS_CHANGED : AuditActionType.UPDATED,
+      fieldName,
+      fromValue: fromValue == null ? null : String(fromValue),
+      toValue: toValue == null ? null : String(toValue)
+    });
   }
 
   const updated = await getStudentDetail(id);

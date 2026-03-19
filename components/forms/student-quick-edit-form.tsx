@@ -3,21 +3,10 @@
 import { StudentStatus } from "@prisma/client";
 import { useRouter } from "next/navigation";
 import { startTransition, useState } from "react";
-import { studentStatusLabelMap } from "@/lib/server/config";
+import { studentManualEditableStatuses, studentStatusLabelMap } from "@/lib/server/config";
 import { formatUserOptionLabel } from "@/lib/utils";
 
 type Option = { id: string; name: string; role?: string; title?: string | null; managerName?: string | null };
-
-const salesEditableStatuses: StudentStatus[] = [
-  StudentStatus.LOW_PRICE_PURCHASED,
-  StudentStatus.WECHAT_ADDED,
-  StudentStatus.IN_GROUP_LEARNING,
-  StudentStatus.SEAT_CARD_PAID,
-  StudentStatus.FINAL_PAYMENT_PENDING,
-  StudentStatus.FORMALLY_ENROLLED,
-  StudentStatus.PRE_START_OBSERVING,
-  StudentStatus.REFUND_WARNING
-];
 
 export function StudentQuickEditForm(props: {
   studentId: string;
@@ -33,7 +22,9 @@ export function StudentQuickEditForm(props: {
   users: Option[];
 }) {
   const router = useRouter();
-  const salesUsers = props.users.filter((item) => item.role === "SALES");
+  const salesUsers = props.users.filter(
+    (item) => item.title === "SALES" || item.title === "PRIVATE_OPS"
+  );
   const deliveryUsers = props.users.filter((item) => item.role === "DELIVERY");
   const [expanded, setExpanded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -114,7 +105,7 @@ export function StudentQuickEditForm(props: {
                   }))
                 }
               >
-                {salesEditableStatuses.map((status) => (
+                {studentManualEditableStatuses.map((status) => (
                   <option key={status} value={status}>
                     {studentStatusLabelMap[status]}
                   </option>

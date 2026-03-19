@@ -24,6 +24,7 @@ export function RefundRequestForm(props: {
   createdById?: string | null;
   dictionaries: Dictionary[];
   actorUsers: User[];
+  canCreate?: boolean;
 }) {
   const router = useRouter();
   const reasonL1 = props.dictionaries.filter((item) => item.type === "refund_reason_l1");
@@ -49,6 +50,10 @@ export function RefundRequestForm(props: {
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!props.canCreate) {
+      window.alert("当前岗位没有发起退款申请权限");
+      return;
+    }
     setLoading(true);
     const response = await fetch("/api/refund-requests", {
       method: "POST",
@@ -115,25 +120,18 @@ export function RefundRequestForm(props: {
         </select>
       </div>
       <div>
-        <label className="field-label">当前处理人</label>
-        <select
-          className="field"
-          value={form.currentHandlerId}
-          onChange={(event) =>
-            setForm((current) => ({ ...current, currentHandlerId: event.target.value }))
-          }
-        >
-          {props.actorUsers.map((item) => (
-            <option key={item.id} value={item.id}>
-              {formatUserOptionLabel(item)}
-            </option>
-          ))}
-        </select>
+        <label className="field-label">发起账号</label>
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          {formatUserOptionLabel(
+            props.actorUsers.find((item) => item.id === form.createdById) ?? props.actorUsers[0] ?? { id: "", name: "未选择" }
+          )}
+        </div>
       </div>
       <div>
         <label className="field-label">申请金额</label>
         <input
           className="field"
+          disabled={!props.canCreate}
           type="number"
           value={form.requestedAmount}
           onChange={(event) =>
@@ -150,6 +148,7 @@ export function RefundRequestForm(props: {
         <label className="field-label">退款说明</label>
         <textarea
           className="field min-h-24 py-3"
+          disabled={!props.canCreate}
           value={form.requestNote}
           onChange={(event) =>
             setForm((current) => ({ ...current, requestNote: event.target.value }))
@@ -157,7 +156,12 @@ export function RefundRequestForm(props: {
         />
       </div>
       <div className="md:col-span-2">
-        <button className="btn-primary" disabled={loading} type="submit">
+        {!props.canCreate ? (
+          <div className="mb-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+            当前岗位仅可查看退款留痕，不能发起新的退款申请。
+          </div>
+        ) : null}
+        <button className="btn-primary" disabled={loading || !props.canCreate} type="submit">
           {loading ? "提交中..." : "发起退款申请"}
         </button>
       </div>

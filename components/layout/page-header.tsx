@@ -12,7 +12,7 @@ export function PageHeader(props: {
         <p className="text-xs font-semibold uppercase tracking-[0.24em] text-brand-700">
           {props.eyebrow}
         </p>
-        <h2 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
+        <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950 sm:text-3xl">
           {props.title}
         </h2>
         <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">

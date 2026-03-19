@@ -1,12 +1,10 @@
 import { LeadStatus } from "@prisma/client";
-import { LeadAssignForm } from "@/components/forms/lead-assign-form";
-import { LeadBatchUploadForm } from "@/components/forms/lead-batch-upload-form";
-import { LeadCreateForm } from "@/components/forms/lead-create-form";
 import { PageHeader } from "@/components/layout/page-header";
+import { LeadIntakeWorkbench } from "@/components/leads/lead-intake-workbench";
 import { SectionCard } from "@/components/section-card";
-import { LeadStatusBadge } from "@/components/status-badge";
+import { requireCurrentActorContext } from "@/lib/server/actor";
 import { getLeadOverview, getLeads, getLookupOptions } from "@/lib/server/queries";
-import { formatDateTime, formatMoney, formatUserOptionLabel } from "@/lib/utils";
+import { formatMoney, formatUserOptionLabel } from "@/lib/utils";
 
 export default async function LeadsPage(props: {
   searchParams?: Promise<{
@@ -17,25 +15,31 @@ export default async function LeadsPage(props: {
   }>;
 }) {
   const searchParams = (await props.searchParams) ?? {};
+  const actorContext = await requireCurrentActorContext();
   const [lookups, overview, leads] = await Promise.all([
     getLookupOptions(),
-    getLeadOverview(),
-    getLeads({
-      search: searchParams.search,
-      status: searchParams.status ?? "ALL",
-      ownerId: searchParams.ownerId ?? "ALL",
-      campaignId: searchParams.campaignId ?? "ALL"
-    })
+    getLeadOverview(actorContext.dataScope),
+    getLeads(
+      {
+        search: searchParams.search,
+        status: searchParams.status ?? "ALL",
+        ownerId: searchParams.ownerId ?? "ALL",
+        campaignId: searchParams.campaignId ?? "ALL"
+      },
+      actorContext.dataScope
+    )
   ]);
 
-  const salesUsers = lookups.users.filter((item) => item.role === "SALES");
+  const salesUsers = lookups.users.filter(
+    (item) => item.title === "SALES" || item.title === "PRIVATE_OPS"
+  );
 
   return (
     <div className="space-y-6 py-4">
       <PageHeader
         eyebrow="Lead Pool"
-        title="系统内接量表与销售承接表"
-        description="投放伙伴只录基础订单信息，后续由销售承接人员继续补加V情况、意向、承接备注和状态流转。"
+        title="销售承接台"
+        description={`当前为${actorContext.dataScope.scopeLabel}。这里专门给销售和私域承接使用：承接人、加V、意向、备注、建档和后续跟进都在这里完成。`}
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
@@ -58,15 +62,7 @@ export default async function LeadsPage(props: {
         </SectionCard>
       </div>
 
-      <SectionCard title="批量上传接量表" subtitle="投放伙伴可以直接上传 Excel，不需要逐条手工录入。">
-        <LeadBatchUploadForm />
-      </SectionCard>
-
-      <SectionCard title="新增接量" subtitle="投放伙伴只需要填日期时间、手机号、昵称、订单信息和分配销售。">
-        <LeadCreateForm campaigns={lookups.campaigns} creatives={lookups.creatives} users={lookups.users} />
-      </SectionCard>
-
-      <SectionCard title="筛选器" subtitle="按线索状态、负责人、投放计划查看。">
+      <SectionCard title="筛选器" subtitle="按线索状态、负责人、来源计划查看。">
         <form className="grid gap-4 md:grid-cols-2 xl:grid-cols-5" method="get">
           <div>
             <label className="field-label">关键词</label>
@@ -97,7 +93,7 @@ export default async function LeadsPage(props: {
             </select>
           </div>
           <div>
-            <label className="field-label">投放计划</label>
+            <label className="field-label">来源计划</label>
             <select className="field" defaultValue={searchParams.campaignId ?? "ALL"} name="campaignId">
               <option value="ALL">全部计划</option>
               {lookups.campaigns.map((item) => (
@@ -116,54 +112,29 @@ export default async function LeadsPage(props: {
       </SectionCard>
 
       <div className="grid gap-6 xl:grid-cols-[1.25fr,0.75fr]">
-      <SectionCard title="系统内接量表" subtitle="左侧是投放填写的基础列，右侧是销售承接继续补的状态列。">
-          <div className="table-shell shadow-none">
-            <table>
-              <thead>
-                <tr>
-                  <th>日期时间</th>
-                  <th>手机号</th>
-                  <th>昵称</th>
-                  <th>订单信息</th>
-                  <th>分配销售</th>
-                  <th>添加情况</th>
-                  <th>意向等级</th>
-                  <th>承接备注</th>
-                </tr>
-              </thead>
-              <tbody>
-                {leads.map((lead) => (
-                  <tr key={lead.id}>
-                    <td>{formatDateTime(lead.sourceTime)}</td>
-                    <td>{lead.phone}</td>
-                    <td>
-                      <div className="font-medium text-slate-900">{lead.name}</div>
-                      {lead.student ? (
-                        <div className="mt-1 text-xs font-semibold text-emerald-700">已转学员</div>
-                      ) : null}
-                    </td>
-                    <td>{lead.orderInfo ?? "未填写"}</td>
-                    <td>{lead.currentAssignee?.name ?? "未分配"}</td>
-                    <td>
-                      <LeadStatusBadge status={lead.leadStatus} />
-                    </td>
-                    <td>{lead.intentLevel ?? "待承接评估"}</td>
-                    <td>{lead.note ?? "无"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <SectionCard
+          title="销售承接工作台"
+          subtitle={
+            actorContext.permissions.canHandleLeads
+              ? "左侧先点人，右侧集中填写这一个人的承接信息。这里是销售和私域承接的唯一工作台。"
+              : "当前岗位仅可查看承接结果，不能改添加情况和意向等级。"
+          }
+        >
+          <LeadIntakeWorkbench
+            canEdit={actorContext.permissions.canHandleLeads}
+            canReassign={actorContext.permissions.canReassignLeads}
+            leads={leads}
+            users={salesUsers.map((item) => ({ id: item.id, name: item.name, title: item.title }))}
+          />
         </SectionCard>
-
-        <SectionCard title="按计划表现" subtitle="初步看投放成本与转学员效率。">
+        <SectionCard title="按来源表现" subtitle="初步看各来源的成本与转学员效率。">
           <div className="space-y-3">
             {overview.byCampaign.map((item) => (
               <div key={item.campaign} className="rounded-3xl border border-slate-200 p-4">
                 <p className="font-semibold text-slate-950">{item.campaign}</p>
                 <p className="mt-1 text-sm text-slate-500">{item.channel}</p>
                 <div className="mt-3 grid gap-2 text-sm text-slate-600">
-                  <p>消耗：{formatMoney(item.spentAmount)}</p>
+                  <p>成本：{formatMoney(item.spentAmount)}</p>
                   <p>线索数：{item.leads}</p>
                   <p>已转学员：{item.converted}</p>
                   <p>转化率：{(item.conversionRate * 100).toFixed(1)}%</p>
@@ -173,28 +144,6 @@ export default async function LeadsPage(props: {
           </div>
         </SectionCard>
       </div>
-
-      <SectionCard title="销售承接填写区" subtitle="这里由销售承接人员补添加情况、意向等级和跟进备注。">
-        <div className="grid gap-4 xl:grid-cols-2">
-          {leads.slice(0, 6).map((lead) => (
-            <div key={lead.id} className="rounded-3xl border border-slate-200 p-4">
-              <div className="mb-3">
-                <p className="font-semibold text-slate-950">{lead.name}</p>
-                <p className="text-sm text-slate-500">
-                  {lead.phone} · 当前负责人 {lead.currentAssignee?.name ?? "未分配"} · {lead.orderInfo ?? "无订单备注"}
-                </p>
-              </div>
-              <LeadAssignForm
-                leadId={lead.id}
-                currentAssigneeId={lead.currentAssigneeId}
-                leadStatus={lead.leadStatus}
-                intentLevel={lead.intentLevel}
-                users={salesUsers.map((item) => ({ id: item.id, name: item.name, title: item.title }))}
-              />
-            </div>
-          ))}
-        </div>
-      </SectionCard>
     </div>
   );
 }

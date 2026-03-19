@@ -1,4 +1,6 @@
 import {
+  AuditActionType,
+  AuditEntityType,
   RefundActionType,
   RefundApprovalDecision,
   RefundLevel,
@@ -6,9 +8,10 @@ import {
   StudentStatus
 } from "@prisma/client";
 import { NextResponse } from "next/server";
+import { getCurrentActorContext } from "@/lib/server/actor";
 import { prisma } from "@/lib/server/db";
 import { getRefundWorkbench } from "@/lib/server/queries";
-import { recalculateCohortStats } from "@/lib/server/recompute";
+import { createAuditLog, recalculateCohortStats } from "@/lib/server/recompute";
 
 function getInitialApprovalActorIds(args: {
   salesOwnerId?: string | null;
@@ -20,7 +23,6 @@ function getInitialApprovalActorIds(args: {
     new Set(
       [
         args.salesManagerId,
-        args.salesOwnerId,
         args.handoffToDeliveryAt ? args.deliveryOwnerId : null
       ].filter(Boolean)
     )
@@ -34,11 +36,17 @@ function buildRequestNo() {
 }
 
 export async function GET() {
-  const data = await getRefundWorkbench();
+  const { dataScope } = await getCurrentActorContext();
+  const data = await getRefundWorkbench(dataScope);
   return NextResponse.json(data);
 }
 
 export async function POST(request: Request) {
+  const { actor, permissions } = await getCurrentActorContext();
+  if (!permissions.canCreateRefundRequests) {
+    return NextResponse.json({ message: "当前岗位没有发起退款权限" }, { status: 403 });
+  }
+
   const body = await request.json();
 
   if (!body.studentId || !body.reasonCategory || !body.reasonSubcategory) {
@@ -79,7 +87,7 @@ export async function POST(request: Request) {
       studentId: body.studentId,
       enrollmentId: body.enrollmentId || latestEnrollment?.id || null,
       currentHandlerId: body.currentHandlerId || student.salesOwnerId || null,
-      createdById: body.createdById || null,
+      createdById: actor?.id || null,
       reasonCategory: body.reasonCategory,
       reasonSubcategory: body.reasonSubcategory,
       requestStage: body.requestStage || student.currentStage,
@@ -103,7 +111,7 @@ export async function POST(request: Request) {
           actionType: RefundActionType.CREATED,
           fromLevel: RefundLevel.LEVEL1,
           toLevel: RefundLevel.LEVEL1,
-          actorId: body.createdById || student.salesOwnerId || null,
+          actorId: actor?.id || student.salesOwnerId || null,
           note: body.requestNote || "发起退款申请",
           actedAt: new Date()
         }
@@ -116,6 +124,18 @@ export async function POST(request: Request) {
     data: {
       status: StudentStatus.LEVEL1_PROCESSING
     }
+  });
+  await createAuditLog({
+    actorId: actor?.id || null,
+    entityType: AuditEntityType.REFUND_REQUEST,
+    entityId: refundRequest.id,
+    action: AuditActionType.CREATED,
+    note: "发起退款申请",
+    metaJson: JSON.stringify({
+      studentId: body.studentId,
+      approvalActorIds,
+      currentHandlerId: body.currentHandlerId || student.salesOwnerId || null
+    })
   });
 
   if (student.cohortId) {

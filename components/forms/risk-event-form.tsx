@@ -12,6 +12,8 @@ export function RiskEventForm(props: {
   studentId: string;
   enrollmentId?: string;
   reporters: Reporter[];
+  currentReporterId?: string | null;
+  canEdit?: boolean;
 }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -23,12 +25,16 @@ export function RiskEventForm(props: {
   }>({
     signalCode: riskSignalCatalog[0].code,
     stage: EnrollmentStage.PRE_START,
-    reporterId: props.reporters[0]?.id ?? "",
+    reporterId: props.currentReporterId ?? props.reporters[0]?.id ?? "",
     note: ""
   });
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!props.canEdit) {
+      window.alert("当前岗位没有新增风险事件权限");
+      return;
+    }
     setLoading(true);
     const response = await fetch("/api/risk-events", {
       method: "POST",
@@ -54,11 +60,12 @@ export function RiskEventForm(props: {
     <form className="grid gap-4 md:grid-cols-2" onSubmit={onSubmit}>
       <div>
         <label className="field-label">预警信号</label>
-        <select
-          className="field"
-          value={form.signalCode}
-          onChange={(event) =>
-            setForm((current) => ({ ...current, signalCode: event.target.value }))
+      <select
+        className="field"
+        disabled={!props.canEdit}
+        value={form.signalCode}
+        onChange={(event) =>
+          setForm((current) => ({ ...current, signalCode: event.target.value }))
           }
         >
           {riskSignalCatalog.map((item) => (
@@ -70,11 +77,12 @@ export function RiskEventForm(props: {
       </div>
       <div>
         <label className="field-label">发生阶段</label>
-        <select
-          className="field"
-          value={form.stage}
-          onChange={(event) =>
-            setForm((current) => ({
+      <select
+        className="field"
+        disabled={!props.canEdit}
+        value={form.stage}
+        onChange={(event) =>
+          setForm((current) => ({
               ...current,
               stage: event.target.value as EnrollmentStage
             }))
@@ -89,30 +97,23 @@ export function RiskEventForm(props: {
       </div>
       <div>
         <label className="field-label">记录人</label>
-        <select
-          className="field"
-          value={form.reporterId}
-          onChange={(event) =>
-            setForm((current) => ({ ...current, reporterId: event.target.value }))
-          }
-        >
-          {props.reporters.map((item) => (
-            <option key={item.id} value={item.id}>
-              {formatUserOptionLabel(item)}
-            </option>
-          ))}
-        </select>
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          {formatUserOptionLabel(
+            props.reporters.find((item) => item.id === form.reporterId) ?? props.reporters[0] ?? { id: "", name: "未选择" }
+          )}
+        </div>
       </div>
       <div className="md:col-span-2">
         <label className="field-label">备注</label>
         <textarea
           className="field min-h-24 py-3"
+          disabled={!props.canEdit}
           value={form.note}
           onChange={(event) => setForm((current) => ({ ...current, note: event.target.value }))}
         />
       </div>
       <div className="md:col-span-2">
-        <button className="btn-primary" disabled={loading} type="submit">
+        <button className="btn-primary" disabled={loading || !props.canEdit} type="submit">
           {loading ? "提交中..." : "新增风险事件"}
         </button>
       </div>

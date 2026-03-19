@@ -2,17 +2,19 @@ import { HorizontalBarList } from "@/components/charts/analytics-charts";
 import { FunnelStageChart } from "@/components/charts/dashboard-charts";
 import { PageHeader } from "@/components/layout/page-header";
 import { SectionCard } from "@/components/section-card";
+import { requireCurrentActorContext } from "@/lib/server/actor";
 import { getSalesFunnelData } from "@/lib/server/queries";
 
 export default async function FunnelPage() {
-  const data = await getSalesFunnelData();
+  const { dataScope } = await requireCurrentActorContext();
+  const data = await getSalesFunnelData(dataScope);
 
   return (
     <div className="space-y-6 py-4">
       <PageHeader
         eyebrow="Sales Funnel"
         title="销售转化漏斗"
-        description="按销售负责人拆解首响、加微、进群、占位卡、尾款、正式报名，定位前链路卡点。"
+        description={`当前为${data.scopeLabel}。按销售负责人拆解首响、加微、进群、占位卡、尾款、正式报名，定位前链路卡点。`}
       />
 
       <SectionCard title="整体漏斗" subtitle="从进线到正式报名的总体转化。">

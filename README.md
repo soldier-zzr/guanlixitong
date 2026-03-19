@@ -1,221 +1,223 @@
-# 密训课程退款风控与晚退费管理系统
+# 珠峰学员管理系统
 
-面向“低价课 -> 企微 -> 公开课 -> 密训 2.0 -> 占位卡 -> 尾款 -> 正式报名 -> 开课前退款风控”的业务原型系统。
+面向“投放录入 -> 销售承接 -> 学员主档 -> 风险预警 -> 退款工作台 -> ROI 复盘”的内部协作系统。
 
-核心目标不是卡退款，而是把退款预警、分层处理、ROI 影响和责任归因做成一套可运行的业务后台。
+当前版本已经具备：
+- 线索录入、批量导入、销售分配
+- 私域承接、建档、成交推进
+- 风险事件与自动预警
+- 退款分层处理、审批留痕
+- 营期 / 截止日期 / 预收净收口径 ROI
+- 审计日志与营收台账
 
-## 1. 已实现能力
-
-- 学员主档案：新增学员、绑定期次、销售、交付负责人。
-- 线索池：记录投放计划、素材、进线时间、质量分、意向等级、当前销售负责人。
-- 分配承接：记录线索分配、首响时间、是否超时、当前分配结果。
-- 销售漏斗：记录加微、进群、占位卡、尾款、正式报名等前链路转化节点。
-- 成交过程：记录低价课、企微、公开课、占位卡、尾款、正式报名节点。
-- 风险预警：记录标准化风险信号并自动更新风险等级。
-- 退款处理：发起退款申请，按一级销售 -> 二级交付 -> 三级主管流转。
-- 处理留痕：所有退款动作会落到 `refund_actions`。
-- ROI 分析：支持毛收入、净收入、毛 ROI、净 ROI、退款影响分析。
-- 管理看板：总览、趋势、风险分布、退款工作台、期次/销售/交付/阶段/原因分析。
-
-## 2. 技术栈
+## 技术栈
 
 - 前端：Next.js 15 + React 19 + TypeScript
-- 后端：Next.js App Router Route Handlers
-- 数据库：SQLite
+- 后端：Next.js Route Handlers
 - ORM：Prisma
-- 图表：Recharts
-- 样式：Tailwind CSS
+- 数据库：
+  - 局域网试跑：SQLite
+  - 云端 / 多人在线推荐：PostgreSQL
 
-选择理由：
+## 本地开发
 
-- 原型阶段本地启动快，依赖少。
-- 页面和接口在同一工程内，交付速度高。
-- Prisma schema 适合快速迭代业务模型。
-- SQLite 方便本地演示和 seed 数据分发。
-
-## 3. 项目结构
-
-```text
-app/
-  api/                     # 接口层
-  analytics/               # ROI 分析页
-  funnel/                  # 销售漏斗页
-  leads/                   # 线索池与分配页
-  refunds/                 # 退款工作台
-  risk/                    # 风险预警页
-  students/                # 学员列表与详情
-components/
-  charts/                  # 图表组件
-  forms/                   # 表单与业务动作组件
-  layout/                  # 页面布局
-lib/
-  server/                  # Prisma、查询、聚合、回写逻辑
-prisma/
-  schema.prisma            # 数据模型
-  seed.ts                  # 假数据
-scripts/
-  prepare-db.mjs           # 首次启动时自动创建 SQLite 文件
-```
-
-## 4. 数据库设计
-
-以 `prisma/schema.prisma` 为最终准确定义，核心表如下：
-
-- `students`
-  - 学员主档案，保存基础信息、期次、负责人、当前状态、风险等级。
-- `campaigns`
-  - 投放计划表，记录投放渠道、计划、消耗。
-- `ad_creatives`
-  - 素材表，用于分析素材进量和质量。
-- `leads`
-  - 线索池表，管理学生转化前的进线数据。
-- `lead_assignments`
-  - 分配承接表，记录分配、接受、首响、超时。
-- `sales_funnel_events`
-  - 销售漏斗事件表，记录加微、进群、占位卡、尾款等节点。
-- `enrollments`
-  - 成交过程表，记录低价课、企微、公开课、占位卡、尾款、正式报名等节点。
-- `risk_events`
-  - 风险事件表，记录风险信号、发生阶段、严重度、记录人、时间。
-- `refund_requests`
-  - 退款申请表，记录当前处理层级、原因分类、金额、状态、最终结果。
-- `refund_actions`
-  - 退款动作日志，记录创建、升级、挽回、退款、结案等动作。
-- `roi_period_stats`
-  - 期次经营快照，记录投放、毛收入、退款额、净收入、毛 ROI、净 ROI。
-- `users`
-  - 系统账号，区分销售、交付、主管、管理员。
-- `dictionaries`
-  - 字典表，保存退款原因、风险信号、状态字典等标准化数据。
-- `cohorts`
-  - 期次表，用于多期次扩展和 ROI 汇总。
-
-设计原则：
-
-- 成交状态、风险状态、退款状态分离，不把所有业务硬塞进单一字段。
-- 退款处理全程留痕，支持追责和复盘。
-- 期次维度独立建模，便于未来扩展多课程版本、多招生团队。
-
-## 5. API 列表
-
-- `GET /api/dashboard`
-  - 获取仪表盘总览、前链路漏斗、风险分布、退款趋势。
-- `GET /api/analytics`
-  - 获取 ROI 与退款归因分析数据。
-- `GET /api/funnel`
-  - 获取销售漏斗汇总和按销售漏斗分析。
-- `POST /api/imports`
-  - 导入前端《接量.xlsx》或中端《密训尾款工单.xlsx》。
-- `GET /api/reports/backend-summary`
-  - 下载系统自动生成的《营期-转化率-营收统计.xlsx》。
-- `GET /api/leads`
-  - 获取线索池列表，支持关键词、状态、负责人、计划筛选。
-- `POST /api/leads`
-  - 新增线索并进入分配池。
-- `PATCH /api/leads/:id`
-  - 执行线索重新分配或更新线索状态。
-- `GET /api/students`
-  - 获取学员列表，支持搜索、状态、负责人、期次筛选。
-- `POST /api/students`
-  - 新增学员并创建首条成交记录。
-- `GET /api/students/:id`
-  - 获取学员详情、时间线、风险事件、退款记录。
-- `PATCH /api/students/:id`
-  - 更新学员主档案、负责人、风险等级、金额等。
-- `POST /api/risk-events`
-  - 新增风险事件并自动刷新风险等级。
-- `GET /api/refund-requests`
-  - 获取退款工作台列表。
-- `POST /api/refund-requests`
-  - 发起退款申请并进入一级处理。
-- `PATCH /api/refund-requests/:id`
-  - 升级、挽回、退款、结案等退款流转动作。
-- `GET /api/dictionaries`
-  - 获取字典数据。
-
-## 6. 本地启动
-
-### 6.1 安装依赖
+### 1. 安装依赖
 
 ```bash
 npm install
 ```
 
-### 6.2 初始化数据库并灌入假数据
+### 2. 初始化数据库
 
 ```bash
 npm run db:setup
 ```
 
-等价于：
-
-```bash
-npm run db:push
-npm run db:seed
-```
-
-### 6.3 启动开发环境
+### 3. 启动开发环境
 
 ```bash
 npm run dev
 ```
 
-浏览器访问：
-
+默认访问：
 - [http://localhost:3000](http://localhost:3000)
-- 导入页：[http://localhost:3000/imports](http://localhost:3000/imports)
 
-### 6.4 生产构建验证
+默认管理员账号：
+- 手机号：`13900000001`
+- 密码：`zf123456`
+
+## 局域网部署
+
+适用于公司内网 5-20 人试跑，同一台 Windows 主机对外提供访问。
+
+### 1. 配置环境变量
+
+复制 `.env.example` 为 `.env`，默认即可：
+
+```env
+DATABASE_URL="file:./prisma/dev.db"
+PORT="3021"
+HOSTNAME="0.0.0.0"
+APP_BASE_URL="http://localhost:3021"
+SEED_ON_BOOT="false"
+```
+
+### 2. 初始化数据库
+
+```bash
+npm run db:setup
+```
+
+### 3. 生产构建
 
 ```bash
 npm run build
-npm run start
 ```
 
-## 7. Excel 导入与汇总
+### 4. 启动局域网服务
 
-现在这 3 张表的系统定位如下：
+方式一：
 
-- `接量.xlsx`
-  - 作为前端明细源，导入到 `leads`、`lead_assignments`、`sales_funnel_events`
-- `【珠峰学苑】密训尾款工单系统_密训营转数据.xlsx`
-  - 作为中端明细源，导入到 `students`、`enrollments`、`refund_requests`
-- `营期-转化率-营收统计.xlsx`
-  - 不再手工维护，由系统自动汇总并支持下载
+```bash
+npm run start:lan
+```
 
-导入建议：
+方式二（Windows PowerShell）：
 
-- 优先在 `/imports` 页面直接上传文件
-- 中端表导入支持重复执行，不会重复创建同一笔导入退款单
-- 导入中端表后，系统会自动重算营期 ROI 快照
+```powershell
+.\scripts\start-lan.ps1
+```
 
-## 8. 内置假数据
+启动后可通过以下地址访问：
+- 本机：[http://localhost:3021](http://localhost:3021)
+- 局域网示例：[http://你的电脑IP:3021](http://你的电脑IP:3021)
 
-Seed 已内置：
+健康检查：
+- [http://localhost:3021/api/health](http://localhost:3021/api/health)
 
-- 3 个期次
-- 6 个系统角色账号
-- 3 个投放计划
-- 5 个投放素材
-- 18 条线索
-- 12 个学员
-- 多种风险信号
-- 5 条退款申请
-- 多级升级、挽回、已退款案例
+### 5. 局域网部署建议
 
-数据覆盖以下场景：
+- 给这台机器固定局域网 IP。
+- 放行 Windows 防火墙 `3021` 端口。
+- 确保只运行一个服务实例，避免 SQLite 文件锁冲突。
+- 若需要长期驻留，建议用“任务计划程序”开机启动 `npm run start:lan`。
 
-- 已拍占位卡但未补尾款
-- 正式报名后开课前退款预警
-- 一级处理中、二级处理中、三级处理中
-- 已挽回、已退款、已结案
-- 多销售、多交付、多期次对比
+## 云端 / 多人在线部署
 
-## 9. 后续建议
+如果准备让多人长期同时在线使用，建议直接切 PostgreSQL，再用 Docker Compose 部署。
 
-- 接企微、通话、投放平台，自动生成风险事件。
-- 增加退款 SLA、超时预警、主管待办。
-- 增加课程版本、班主任、老师维度分析。
-- 增加真实财务审批流与打款记录。
-- 增加权限系统、登录、操作审计。
-- 增加 AI 风险评分和退款话术辅助。
+### 方案结构
+
+仓库已提供：
+- [Dockerfile](E:\guanlixitong\Dockerfile)
+- [docker-compose.deploy.yml](E:\guanlixitong\docker-compose.deploy.yml)
+- [scripts/docker-entrypoint.sh](E:\guanlixitong\scripts\docker-entrypoint.sh)
+
+### 1. 服务器准备
+
+推荐：
+- Ubuntu 22.04 / 24.04
+- 2C4G 起步
+- 安装 Docker 与 Docker Compose
+- 放行 `3021` 端口
+
+### 2. 设置生产环境变量
+
+建议使用 PostgreSQL：
+
+```env
+DATABASE_URL="postgresql://zhufeng:zhufeng123@zhufeng-postgres:5432/zhufeng_student?schema=public"
+PORT="3021"
+HOSTNAME="0.0.0.0"
+APP_BASE_URL="https://你的域名"
+SEED_ON_BOOT="false"
+```
+
+### 3. 启动
+
+```bash
+docker compose -f docker-compose.deploy.yml up -d --build
+```
+
+系统会在容器启动时自动执行：
+- `node scripts/prepare-db.mjs`
+- `npx prisma db push --skip-generate`
+- `npm run start -- --hostname 0.0.0.0 --port 3021`
+
+### 4. 首次演示环境灌数
+
+如果需要演示数据，把 `SEED_ON_BOOT` 改成 `true`，首次启动后再改回 `false`。
+
+### 5. 反向代理建议
+
+生产上建议在 Nginx / Caddy / 云负载均衡后面挂载：
+- `https://你的域名 -> http://127.0.0.1:3021`
+
+### 6. 健康检查
+
+云平台可直接用：
+- `GET /api/health`
+
+返回示例：
+
+```json
+{
+  "status": "ok",
+  "app": "珠峰学员管理系统",
+  "database": "connected"
+}
+```
+
+## 数据模型升级要点
+
+### 状态唯一入口
+
+- 线索状态：`Lead`
+- 报名状态：`Enrollment`
+- 退款状态：`RefundRequest`
+- 学员主档：只保存当前汇总态，不作为流程主源
+
+### 审计与台账
+
+- `AuditLog`：记录谁改了什么
+- `RevenueLedger`：记录占位卡、尾款、退款、确认收入
+
+### 多次进线 / 多次报名
+
+- 同手机号允许多条 `Lead`
+- 同手机号学员复用 `Student`
+- 不同营期报名新增 `Enrollment`
+
+## 关键接口
+
+- `GET /api/health`
+  - 应用和数据库健康状态
+- `GET /api/students`
+  - 学员列表，按当前账号视角自动收口
+- `PATCH /api/students/:id`
+  - 学员主档编辑，不允许直接推进退款流程状态
+- `GET /api/leads`
+  - 线索列表
+- `PATCH /api/leads/:id`
+  - 承接状态或重新分配
+- `GET /api/refund-requests`
+  - 退款工作台
+- `PATCH /api/refund-requests/:id`
+  - 升级、审批、挽回、退款、结案
+- `GET /api/analytics`
+  - `mode=COHORT | AS_OF_DATE | NET_CASH`
+
+## 我们已经验证过的环节
+
+- 学员页不能直接把状态改成 `REFUNDED`
+- 同手机号重复导入线索会生成多条线索实例
+- 同手机号再次报名只新增 `Enrollment`
+- 一级销售 -> 二级交付 -> 审批 -> 退款回写流程可跑通
+- 学员状态、退款单状态、营收台账、审计日志可同步
+- 投放、销售、交付、审批人视角权限已做后端校验
+
+## 当前已知建议
+
+- 局域网单机版本仍推荐只跑一个实例。
+- 真正多人长期在线，优先使用 PostgreSQL 容器部署。
+- 若接入正式财务口径，下一步建议加账单核对与导出。

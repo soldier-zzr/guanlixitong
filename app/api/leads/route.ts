@@ -1,21 +1,36 @@
-import { AssignmentResult, EnrollmentStage, FunnelEventType, LeadStatus } from "@prisma/client";
+import {
+  AssignmentResult,
+  AuditActionType,
+  AuditEntityType,
+  EnrollmentStage,
+  FunnelEventType,
+  LeadStatus
+} from "@prisma/client";
 import { NextResponse } from "next/server";
+import { getCurrentActorContext } from "@/lib/server/actor";
 import { prisma } from "@/lib/server/db";
 import { getLeads } from "@/lib/server/queries";
+import { createAuditLog } from "@/lib/server/recompute";
 
 export async function GET(request: Request) {
+  const { dataScope } = await getCurrentActorContext();
   const { searchParams } = new URL(request.url);
   const data = await getLeads({
     search: searchParams.get("search") || undefined,
     status: (searchParams.get("status") as LeadStatus | "ALL" | null) ?? "ALL",
     ownerId: searchParams.get("ownerId") || "ALL",
     campaignId: searchParams.get("campaignId") || "ALL"
-  });
+  }, dataScope);
 
   return NextResponse.json(data);
 }
 
 export async function POST(request: Request) {
+  const { actor, permissions } = await getCurrentActorContext();
+  if (!permissions.canInputLeads) {
+    return NextResponse.json({ message: "当前岗位没有录入接量表权限" }, { status: 403 });
+  }
+
   const body = await request.json();
 
   if (!body.name || !body.phone || !body.sourceTime) {
@@ -33,6 +48,7 @@ export async function POST(request: Request) {
       qualityScore: Number(body.qualityScore ?? 60),
       leadStatus: body.currentAssigneeId ? LeadStatus.ASSIGNED : LeadStatus.NEW,
       note: body.note || null,
+      sourceOwnerId: actor?.id ?? null,
       campaignId: body.campaignId || null,
       creativeId: body.creativeId || null,
       currentAssigneeId: body.currentAssigneeId || null,
@@ -70,6 +86,17 @@ export async function POST(request: Request) {
         ]
       }
     }
+  });
+  await createAuditLog({
+    actorId: actor?.id ?? null,
+    entityType: AuditEntityType.LEAD,
+    entityId: lead.id,
+    action: AuditActionType.CREATED,
+    note: "投放录入新增线索",
+    metaJson: JSON.stringify({
+      phone: body.phone,
+      currentAssigneeId: body.currentAssigneeId || null
+    })
   });
 
   return NextResponse.json(lead);

@@ -6,11 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "start:lan": "next start --hostname 0.0.0.0 --port 3021",
     "lint": "next lint",
     "db:prepare": "node scripts/prepare-db.mjs",
     "db:push": "node scripts/prepare-db.mjs && prisma db push",
     "db:seed": "node scripts/prepare-db.mjs && prisma db seed",
-    "db:setup": "node scripts/prepare-db.mjs && prisma db push && prisma db seed"
+    "db:setup": "node scripts/prepare-db.mjs && prisma db push && prisma db seed",
+    "db:deploy": "node scripts/prepare-db.mjs && prisma db push --skip-generate"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

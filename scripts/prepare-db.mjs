@@ -1,11 +1,19 @@
-import { existsSync, mkdirSync, openSync, closeSync } from "node:fs";
-import { resolve } from "node:path";
+import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 
-const prismaDir = resolve(process.cwd(), "prisma");
-const dbFile = resolve(prismaDir, "dev.db");
+const databaseUrl = process.env.DATABASE_URL ?? "file:./prisma/dev.db";
 
-if (!existsSync(prismaDir)) {
-  mkdirSync(prismaDir, { recursive: true });
+if (!databaseUrl.startsWith("file:")) {
+  console.log(`DATABASE_URL uses a server database, skipping SQLite bootstrap: ${databaseUrl}`);
+  process.exit(0);
+}
+
+const relativePath = databaseUrl.replace(/^file:/, "");
+const dbFile = resolve(process.cwd(), relativePath);
+const dbDir = dirname(dbFile);
+
+if (!existsSync(dbDir)) {
+  mkdirSync(dbDir, { recursive: true });
 }
 
 if (!existsSync(dbFile)) {

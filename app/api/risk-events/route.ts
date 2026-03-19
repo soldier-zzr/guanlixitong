@@ -1,10 +1,16 @@
 import { EnrollmentStage } from "@prisma/client";
 import { NextResponse } from "next/server";
+import { getCurrentActorContext } from "@/lib/server/actor";
 import { riskSignalCatalog } from "@/lib/server/config";
 import { prisma } from "@/lib/server/db";
 import { recalculateCohortStats, refreshStudentRisk } from "@/lib/server/recompute";
 
 export async function POST(request: Request) {
+  const { actor, permissions } = await getCurrentActorContext();
+  if (!permissions.canCreateRiskEvents) {
+    return NextResponse.json({ message: "当前岗位没有新增风险事件权限" }, { status: 403 });
+  }
+
   const body = await request.json();
   const signal = riskSignalCatalog.find((item) => item.code === body.signalCode);
 
@@ -27,7 +33,7 @@ export async function POST(request: Request) {
       severityScore: signal.severity,
       note: body.note || null,
       occurredAt: body.occurredAt ? new Date(body.occurredAt) : new Date(),
-      reporterId: body.reporterId || null
+      reporterId: actor?.id || null
     }
   });
 

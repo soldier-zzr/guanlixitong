@@ -1,10 +1,17 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { AppShell } from "@/components/layout/app-shell";
 
 export const metadata: Metadata = {
-  title: "密训课程退款风控与晚退费管理系统",
-  description: "针对密训 2.0 的退款风控、分层处理与 ROI 经营分析原型。"
+  title: "珠峰学员管理系统",
+  description: "聚焦线索承接、报课转化、退款审批与净 ROI 管理的业务协作系统。"
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  userScalable: true
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

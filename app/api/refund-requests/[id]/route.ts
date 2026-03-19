@@ -1,13 +1,17 @@
 import {
+  AuditActionType,
+  AuditEntityType,
   RefundActionType,
   RefundApprovalDecision,
   RefundStatus
 } from "@prisma/client";
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/server/db";
-import { applyRefundStatusUpdate, nextRefundLevel } from "@/lib/server/recompute";
+import { getCurrentActorContext } from "@/lib/server/actor";
+import { ensureDatabaseReady, prisma } from "@/lib/server/db";
+import { applyRefundStatusUpdate, createAuditLog, nextRefundLevel } from "@/lib/server/recompute";
 
 async function ensureDeliveryApprovalNode(refundRequestId: string) {
+  await ensureDatabaseReady();
   const refundRequest = await prisma.refundRequest.findUnique({
     where: { id: refundRequestId },
     include: {
@@ -65,17 +69,58 @@ async function ensureDeliveryApprovalNode(refundRequestId: string) {
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  await ensureDatabaseReady();
+  const { actor, permissions } = await getCurrentActorContext();
+  if (!permissions.canProcessRefunds) {
+    return NextResponse.json({ message: "当前岗位没有退款处理权限" }, { status: 403 });
+  }
+
   const { id } = await context.params;
   const body = await request.json();
   const action = body.action as string | undefined;
+  const actorId = actor?.id;
+  const refundRequest = await prisma.refundRequest.findUnique({
+    where: { id },
+    include: {
+      approvals: true,
+      student: {
+        include: {
+          deliveryOwner: {
+            select: {
+              id: true,
+              managerId: true
+            }
+          }
+        }
+      }
+    }
+  });
 
   if (!action) {
     return NextResponse.json({ message: "缺少 action" }, { status: 400 });
   }
 
+  if (!refundRequest) {
+    return NextResponse.json({ message: "退款单不存在" }, { status: 404 });
+  }
+
+  const isCurrentHandler = Boolean(actorId && refundRequest.currentHandlerId === actorId);
+  const actorApproval = actorId
+    ? refundRequest.approvals.find((item) => item.approverId === actorId)
+    : null;
+
   if (action === "ESCALATE") {
+    if (!isCurrentHandler) {
+      return NextResponse.json({ message: "只有当前处理人可以升级处理" }, { status: 403 });
+    }
     const currentLevel = body.currentLevel;
     const nextLevelValue = nextRefundLevel(currentLevel);
+    const nextHandlerId =
+      nextLevelValue === "LEVEL2"
+        ? refundRequest.student.deliveryOwnerId ?? refundRequest.currentHandlerId
+        : nextLevelValue === "LEVEL3"
+          ? refundRequest.student.deliveryOwner?.managerId ?? refundRequest.currentHandlerId
+          : refundRequest.currentHandlerId;
     if (nextLevelValue === "LEVEL2") {
       await ensureDeliveryApprovalNode(id);
     }
@@ -83,7 +128,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       refundRequestId: id,
       status: RefundStatus.ESCALATED,
       level: nextLevelValue,
-      actorId: body.actorId,
+      currentHandlerId: nextHandlerId,
+      actorId,
       note: body.note || "升级处理",
       finalResult: `升级至${nextLevelValue}`,
       actionType: RefundActionType.ESCALATED
@@ -92,10 +138,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   }
 
   if (action === "RETAIN") {
+    if (!isCurrentHandler) {
+      return NextResponse.json({ message: "只有当前处理人可以登记挽回" }, { status: 403 });
+    }
     const updated = await applyRefundStatusUpdate({
       refundRequestId: id,
       status: RefundStatus.RETAINED,
-      actorId: body.actorId,
+      actorId,
       note: body.note || "挽回成功",
       retainedAmount: Number(body.retainedAmount ?? 6980),
       finalResult: body.finalResult || "已挽回",
@@ -105,13 +154,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   }
 
   if (action === "REFUND") {
-    const refundRequest = await prisma.refundRequest.findUnique({
-      where: { id },
-      include: { approvals: true }
-    });
-
-    if (!refundRequest) {
-      return NextResponse.json({ message: "退款单不存在" }, { status: 404 });
+    if (!isCurrentHandler) {
+      return NextResponse.json({ message: "只有当前处理人可以确认退款" }, { status: 403 });
     }
 
     const pendingApprovals = refundRequest.approvals.filter(
@@ -128,7 +172,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const updated = await applyRefundStatusUpdate({
       refundRequestId: id,
       status: RefundStatus.REFUNDED,
-      actorId: body.actorId,
+      actorId,
       note: body.note || "确认退款",
       refundedAmount: Number(body.refundedAmount ?? 6980),
       finalResult: body.finalResult || "已退款",
@@ -138,20 +182,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   }
 
   if (action === "APPROVE") {
-    if (!body.actorId) {
+    if (!actorId) {
       return NextResponse.json({ message: "缺少审批人" }, { status: 400 });
     }
 
-    const approval = await prisma.refundApproval.findUnique({
-      where: {
-        refundRequestId_approverId: {
-          refundRequestId: id,
-          approverId: body.actorId
-        }
-      }
-    });
-
-    if (!approval) {
+    if (!actorApproval || actorApproval.decision !== RefundApprovalDecision.PENDING) {
       return NextResponse.json({ message: "当前人员不在退款同意名单中" }, { status: 400 });
     }
 
@@ -159,7 +194,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       where: {
         refundRequestId_approverId: {
           refundRequestId: id,
-          approverId: body.actorId
+          approverId: actorId
         }
       },
       data: {
@@ -176,32 +211,33 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         actions: {
           create: {
             actionType: RefundActionType.NOTE,
-            actorId: body.actorId,
+            actorId,
             note: `退款同意：${body.note || "同意退款"}${body.evidenceUrls ? ` | 证据：${body.evidenceUrls}` : ""}`,
             actedAt: new Date()
           }
         }
       }
     });
+    await createAuditLog({
+      actorId,
+      entityType: AuditEntityType.REFUND_REQUEST,
+      entityId: id,
+      action: AuditActionType.APPROVED,
+      note: body.note || "同意退款",
+      metaJson: JSON.stringify({
+        evidenceUrls: body.evidenceUrls || null
+      })
+    });
 
     return NextResponse.json(updatedApproval);
   }
 
   if (action === "REJECT_APPROVAL") {
-    if (!body.actorId) {
+    if (!actorId) {
       return NextResponse.json({ message: "缺少审批人" }, { status: 400 });
     }
 
-    const approval = await prisma.refundApproval.findUnique({
-      where: {
-        refundRequestId_approverId: {
-          refundRequestId: id,
-          approverId: body.actorId
-        }
-      }
-    });
-
-    if (!approval) {
+    if (!actorApproval || actorApproval.decision !== RefundApprovalDecision.PENDING) {
       return NextResponse.json({ message: "当前人员不在退款同意名单中" }, { status: 400 });
     }
 
@@ -209,7 +245,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       where: {
         refundRequestId_approverId: {
           refundRequestId: id,
-          approverId: body.actorId
+          approverId: actorId
         }
       },
       data: {
@@ -226,23 +262,36 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         actions: {
           create: {
             actionType: RefundActionType.NOTE,
-            actorId: body.actorId,
+            actorId,
             note: `退款不同意：${body.note || "不同意退款"}${body.evidenceUrls ? ` | 证据：${body.evidenceUrls}` : ""}`,
             actedAt: new Date()
           }
         }
       }
     });
+    await createAuditLog({
+      actorId,
+      entityType: AuditEntityType.REFUND_REQUEST,
+      entityId: id,
+      action: AuditActionType.REJECTED,
+      note: body.note || "不同意退款",
+      metaJson: JSON.stringify({
+        evidenceUrls: body.evidenceUrls || null
+      })
+    });
 
     return NextResponse.json(updatedApproval);
   }
 
   if (action === "NOTE") {
+    if (!isCurrentHandler) {
+      return NextResponse.json({ message: "只有当前处理人可以补充跟进说明" }, { status: 403 });
+    }
     const updated = await applyRefundStatusUpdate({
       refundRequestId: id,
       status: body.status || RefundStatus.PROCESSING,
       level: body.currentLevel,
-      actorId: body.actorId,
+      actorId,
       note: body.note || "补充跟进说明",
       finalResult: body.finalResult,
       actionType: RefundActionType.NOTE
@@ -251,11 +300,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   }
 
   if (action === "CLOSE") {
+    if (!isCurrentHandler) {
+      return NextResponse.json({ message: "只有当前处理人可以结案" }, { status: 403 });
+    }
     const updated = await applyRefundStatusUpdate({
       refundRequestId: id,
       status: RefundStatus.CLOSED,
       level: body.currentLevel,
-      actorId: body.actorId,
+      actorId,
       note: body.note || "关闭工单",
       finalResult: body.finalResult || "已结案",
       actionType: RefundActionType.CLOSED

@@ -5,6 +5,7 @@ import { StudentCreateForm } from "@/components/forms/student-create-form";
 import { PageHeader } from "@/components/layout/page-header";
 import { SectionCard } from "@/components/section-card";
 import { StudentEditableTable } from "@/components/students/student-editable-table";
+import { requireCurrentActorContext } from "@/lib/server/actor";
 import { getLookupOptions, getStudents } from "@/lib/server/queries";
 import { formatUserOptionLabel } from "@/lib/utils";
 
@@ -17,14 +18,18 @@ export default async function StudentsPage(props: {
   }>;
 }) {
   const searchParams = (await props.searchParams) ?? {};
+  const actorContext = await requireCurrentActorContext();
   const [lookups, students] = await Promise.all([
     getLookupOptions(),
-    getStudents({
-      search: searchParams.search,
-      status: (searchParams.status as never) ?? "ALL",
-      ownerId: searchParams.ownerId ?? "ALL",
-      cohortId: searchParams.cohortId ?? "ALL"
-    })
+    getStudents(
+      {
+        search: searchParams.search,
+        status: (searchParams.status as never) ?? "ALL",
+        ownerId: searchParams.ownerId ?? "ALL",
+        cohortId: searchParams.cohortId ?? "ALL"
+      },
+      actorContext.dataScope
+    )
   ]);
 
   return (
@@ -32,19 +37,23 @@ export default async function StudentsPage(props: {
       <PageHeader
         eyebrow="Students"
         title="学员主档案与成交过程"
-        description="从低价课、加企微、公开课、占位卡、尾款到正式报名，把学员状态和负责人持续串起来。"
+        description={`当前为${actorContext.dataScope.scopeLabel}。从低价课、加企微、公开课、占位卡、尾款到正式报名，把学员状态和负责人持续串起来。`}
       />
 
-      <SectionCard title="新增学员" subtitle="创建学员主档案并同步建立首条成交过程记录。">
-        <StudentCreateForm cohorts={lookups.cohorts} users={lookups.users} />
-      </SectionCard>
+      {actorContext.permissions.canCreateStudents ? (
+        <SectionCard title="新增学员" subtitle="创建学员主档案并同步建立首条成交过程记录。">
+          <StudentCreateForm cohorts={lookups.cohorts} users={lookups.users} />
+        </SectionCard>
+      ) : null}
 
-      <SectionCard
-        title="营期维护"
-        subtitle="营期默认按“起盘营 x 期”生成，也支持你自定义名称、编码和预算口径。"
-      >
-        <CohortCreateForm />
-      </SectionCard>
+      {actorContext.permissions.canManageCohorts ? (
+        <SectionCard
+          title="营期维护"
+          subtitle="营期默认按“起盘营 x 期”生成，也支持你自定义名称、编码和预算口径。"
+        >
+          <CohortCreateForm />
+        </SectionCard>
+      ) : null}
 
       <SectionCard
         title="筛选器"
@@ -110,7 +119,16 @@ export default async function StudentsPage(props: {
         </form>
       </SectionCard>
 
-      <StudentEditableTable cohorts={lookups.cohorts} students={students} users={lookups.users} />
+      <StudentEditableTable
+        cohorts={lookups.cohorts}
+        permissions={{
+          canEditSales: actorContext.permissions.canEditStudentSales,
+          canEditDelivery: actorContext.permissions.canEditStudentDelivery,
+          canBulkEdit: actorContext.permissions.canEditStudentSales
+        }}
+        students={students}
+        users={lookups.users}
+      />
     </div>
   );
 }

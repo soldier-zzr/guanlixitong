@@ -2,20 +2,25 @@ import { PageHeader } from "@/components/layout/page-header";
 import { RefundWorkbenchActions } from "@/components/forms/refund-workbench-actions";
 import { SectionCard } from "@/components/section-card";
 import { RefundStatusBadge, RiskBadge, StudentStatusBadge } from "@/components/status-badge";
+import { requireCurrentActorContext } from "@/lib/server/actor";
 import { getLookupOptions, getRefundWorkbench } from "@/lib/server/queries";
 import { formatDateTime, formatMoney } from "@/lib/utils";
 import { refundLevelLabelMap } from "@/lib/server/config";
 
 export default async function RefundsPage() {
-  const [lookups, requests] = await Promise.all([getLookupOptions(), getRefundWorkbench()]);
-  const defaultActor = lookups.users[0]?.id ?? null;
+  const actorContext = await requireCurrentActorContext();
+  const [lookups, requests] = await Promise.all([
+    getLookupOptions(),
+    getRefundWorkbench(actorContext.dataScope)
+  ]);
+  const defaultActor = actorContext.actor?.id ?? lookups.users[0]?.id ?? null;
 
   return (
     <div className="space-y-6 py-4">
       <PageHeader
         eyebrow="Refund Workbench"
         title="退款处理工作台"
-        description="按一级销售、二级交付、三级主管推进退款处理。未转交交付时只走销售负责人同意，转交交付后再补交付同意节点。"
+        description={`当前为${actorContext.dataScope.scopeLabel}。按一级销售、二级交付、三级主管推进退款处理。`}
       />
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -115,13 +120,32 @@ export default async function RefundsPage() {
                   根据当前层级执行升级、挽回、退款或结案，系统会自动回写学员状态和 ROI。
                 </p>
                 <div className="mt-4">
-                  <RefundWorkbenchActions
-                    refundRequestId={request.id}
-                    currentLevel={request.currentLevel}
-                    status={request.status}
-                    actorId={request.currentHandlerId ?? defaultActor}
-                    users={lookups.users.map((item) => ({ id: item.id, name: item.name, title: item.title }))}
-                  />
+                  {(() => {
+                    const actorApproval = request.approvals.find(
+                      (approval) => approval.approver.id === actorContext.actor?.id
+                    );
+                    const pendingApproverNames = request.approvals
+                      .filter((approval) => approval.decision === "PENDING")
+                      .map((approval) => approval.approver.name);
+
+                    return (
+                      <RefundWorkbenchActions
+                        actorLabel={actorContext.actor?.name ?? "未选择账号"}
+                        canProcess={actorContext.permissions.canProcessRefunds}
+                        refundRequestId={request.id}
+                        currentLevel={request.currentLevel}
+                        status={request.status}
+                        actorId={defaultActor}
+                        currentHandlerId={request.currentHandler?.id ?? null}
+                        actorApprovalDecision={actorApproval?.decision ?? null}
+                        allApprovalsApproved={
+                          request.approvals.length > 0 &&
+                          request.approvals.every((approval) => approval.decision === "APPROVED")
+                        }
+                        pendingApproverNames={pendingApproverNames}
+                      />
+                    );
+                  })()}
                 </div>
               </div>
             </div>

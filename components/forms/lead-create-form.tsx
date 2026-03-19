@@ -29,7 +29,9 @@ export function LeadCreateForm(props: {
   users: User[];
 }) {
   const router = useRouter();
-  const salesUsers = props.users.filter((item) => item.role === "SALES");
+  const salesUsers = props.users.filter(
+    (item) => item.title === "SALES" || item.title === "PRIVATE_OPS"
+  );
   const [form, setForm] = useState({
     name: "",
     phone: "",
@@ -105,7 +107,7 @@ export function LeadCreateForm(props: {
         </select>
       </div>
       <div>
-        <label className="field-label">投放计划（可选）</label>
+        <label className="field-label">来源计划（可选）</label>
         <select
           className="field"
           value={form.campaignId}
@@ -136,7 +138,7 @@ export function LeadCreateForm(props: {
         </select>
       </div>
       <div className="xl:col-span-2">
-        <label className="field-label">投放备注（可选）</label>
+        <label className="field-label">来源备注（可选）</label>
         <input className="field" value={form.note} onChange={(event) => setForm((current) => ({ ...current, note: event.target.value }))} />
       </div>
       <div className="xl:col-span-5">

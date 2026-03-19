@@ -5,46 +5,113 @@ import { usePathname } from "next/navigation";
 import {
   AlertTriangle,
   BarChart3,
+  BriefcaseBusiness,
   CircleDollarSign,
   Filter,
-  FolderSync,
   LayoutDashboard,
   ListTodo,
   RefreshCw,
+  ShieldCheck,
+  Settings2,
   Users
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { ActorSwitcher } from "@/components/layout/actor-switcher";
+import { BrandBlock } from "@/components/layout/brand-block";
+import { cn, formatUserOptionLabel } from "@/lib/utils";
 
 const navItems = [
   { href: "/", label: "仪表盘", icon: LayoutDashboard },
-  { href: "/imports", label: "报表整合", icon: FolderSync },
-  { href: "/leads", label: "线索池", icon: ListTodo },
+  { href: "/marketing", label: "投放录入", icon: BriefcaseBusiness },
+  { href: "/leads", label: "销售承接", icon: ListTodo },
   { href: "/funnel", label: "销售漏斗", icon: Filter },
   { href: "/students", label: "学员管理", icon: Users },
   { href: "/risk", label: "风险预警", icon: AlertTriangle },
   { href: "/refunds", label: "退款工作台", icon: RefreshCw },
-  { href: "/analytics", label: "ROI 分析", icon: CircleDollarSign }
+  { href: "/analytics", label: "ROI 分析", icon: CircleDollarSign },
+  { href: "/account", label: "账号设置", icon: ShieldCheck }
 ];
 
-export function SidebarNav() {
+export function SidebarNav(props: {
+  actor: {
+    id: string;
+    name: string;
+    role: string;
+    title?: string | null;
+    active: boolean;
+  } | null;
+  sessionUser: {
+    id: string;
+    name: string;
+    role: string;
+    title?: string | null;
+    active: boolean;
+  };
+  sessionPermissions: {
+    canManageTeam: boolean;
+  };
+  permissions: {
+    canManageTeam: boolean;
+    canInputLeads: boolean;
+    canHandleLeads: boolean;
+    canCreateStudents: boolean;
+    canCreateRiskEvents: boolean;
+    canProcessRefunds: boolean;
+  };
+  users: Array<{
+    id: string;
+    name: string;
+    role?: string;
+    title?: string | null;
+    managerName?: string | null;
+  }>;
+}) {
   const pathname = usePathname();
+  const currentNavItems = navItems
+    .filter((item) => {
+      if (item.href === "/marketing") {
+        return props.permissions.canInputLeads || props.permissions.canHandleLeads || props.permissions.canCreateStudents;
+      }
+      if (item.href === "/leads") {
+        return props.permissions.canInputLeads || props.permissions.canHandleLeads;
+      }
+      if (item.href === "/funnel" || item.href === "/students") {
+        return props.permissions.canHandleLeads || props.permissions.canCreateStudents;
+      }
+      if (item.href === "/risk") {
+        return props.permissions.canCreateRiskEvents;
+      }
+      if (item.href === "/refunds" || item.href === "/analytics") {
+        return props.permissions.canProcessRefunds;
+      }
+      return true;
+    })
+    .concat(props.permissions.canManageTeam ? [{ href: "/team", label: "账号管理", icon: Settings2 }] : []);
 
   return (
     <div className="panel-dark sticky top-4 flex h-[calc(100vh-2rem)] flex-col overflow-hidden px-5 py-6">
       <div className="border-b border-white/10 pb-6">
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-brand-200">
-          Refund Risk OS
-        </p>
-        <h1 className="mt-3 text-2xl font-semibold tracking-tight text-white">
-          密训课程退款风控系统
-        </h1>
-        <p className="mt-3 text-sm leading-6 text-slate-300">
-          聚焦晚退费预防、分层处理与净 ROI 管理。
-        </p>
+        <BrandBlock
+          dark
+          stacked
+          description="聚焦线索承接、报课转化、退款审批与净收入管理。"
+        />
+      </div>
+
+      <div className="mt-6">
+        <ActorSwitcher
+          canSwitch={props.sessionPermissions.canManageTeam}
+          currentActorId={props.actor?.id}
+          currentLabel={
+            props.actor && props.actor.id !== props.sessionUser.id
+              ? `${formatUserOptionLabel(props.sessionUser)} -> ${formatUserOptionLabel(props.actor)}`
+              : formatUserOptionLabel(props.sessionUser)
+          }
+          users={props.users}
+        />
       </div>
 
       <nav className="mt-6 flex flex-1 flex-col gap-2">
-        {navItems.map((item) => {
+        {currentNavItems.map((item) => {
           const Icon = item.icon;
           const active = pathname === item.href;
           return (

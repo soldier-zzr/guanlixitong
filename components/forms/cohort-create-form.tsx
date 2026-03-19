@@ -115,7 +115,7 @@ export function CohortCreateForm() {
         />
       </div>
       <div>
-        <label className="field-label">投放预算</label>
+        <label className="field-label">期次成本</label>
         <input
           className="field"
           type="number"

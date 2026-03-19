@@ -29,8 +29,8 @@ export function KpiCard(props: {
           <div
             className={
               props.tone === "dark"
-                ? "mt-4 text-3xl font-semibold tracking-tight text-white"
-                : "mt-4 text-3xl font-semibold tracking-tight text-slate-950"
+                ? "mt-4 text-2xl font-semibold tracking-tight text-white sm:text-3xl"
+                : "mt-4 text-2xl font-semibold tracking-tight text-slate-950 sm:text-3xl"
             }
           >
             {props.value}

@@ -1,6 +1,5 @@
 import clsx, { type ClassValue } from "clsx";
 import { format } from "date-fns";
-import { userTitleLabelMap } from "@/lib/server/config";
 
 export function cn(...inputs: ClassValue[]) {
   return clsx(inputs);
@@ -39,9 +38,5 @@ export function formatUserOptionLabel(user: {
   title?: string | null;
   managerName?: string | null;
 }) {
-  if (user.title && user.title in userTitleLabelMap) {
-    return `${user.name}（${userTitleLabelMap[user.title as keyof typeof userTitleLabelMap]}）`;
-  }
-
   return user.name;
 }

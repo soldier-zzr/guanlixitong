@@ -43,7 +43,7 @@ export function LeadBatchUploadForm() {
           <p className="text-sm font-semibold uppercase tracking-[0.18em] text-brand-700">批量上传</p>
           <h4 className="mt-2 text-lg font-semibold text-slate-950">批量导入系统内接量表</h4>
           <p className="mt-2 text-sm leading-6 text-slate-500">
-            适合投放伙伴一次性上传多条订单信息。导入后，私域承接人员继续在系统里补添加情况和备注。
+            适合录单同事一次性上传多条订单信息。导入后，销售承接人员继续在系统里补添加情况和备注。
           </p>
         </div>
         <a className="btn-secondary" href="/api/reports/lead-intake-template">

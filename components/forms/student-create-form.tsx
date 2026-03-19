@@ -18,7 +18,9 @@ export function StudentCreateForm(props: {
   users: Option[];
 }) {
   const router = useRouter();
-  const salesUsers = props.users.filter((item) => item.role === "SALES");
+  const salesUsers = props.users.filter(
+    (item) => item.title === "SALES" || item.title === "PRIVATE_OPS"
+  );
   const deliveryUsers = props.users.filter((item) => item.role === "DELIVERY");
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({
