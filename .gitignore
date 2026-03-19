@@ -1,5 +1,7 @@
 .next
 node_modules
+dist
+*.zip
 prisma/dev.db
 prisma/dev.db-journal
 prisma/dev.db-shm
