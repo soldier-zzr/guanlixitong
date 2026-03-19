@@ -17,6 +17,7 @@
 - 当前稳定版本：`v1.0.0`
 - 适用阶段：内部试跑、局域网协作、云端部署准备完成
 - 后续建议：每次功能更新同步维护 [CHANGELOG.md](E:\guanlixitong\CHANGELOG.md)
+- 发布流程说明见 [RELEASE.md](E:\guanlixitong\RELEASE.md)
 
 ## 技术栈
 
@@ -53,6 +54,28 @@ npm run dev
 默认管理员账号：
 - 手机号：`13900000001`
 - 密码：`zf123456`
+
+## 版本发布与交付
+
+### 1. 更新版本号
+
+修改 [package.json](E:\guanlixitong\package.json) 中的 `version`。
+
+### 2. 更新变更记录
+
+同步维护 [CHANGELOG.md](E:\guanlixitong\CHANGELOG.md)。
+
+### 3. 生成本地交付包
+
+```bash
+npm run release:bundle
+```
+
+打包完成后输出：
+
+- `releases/珠峰学员管理系统-v版本号-交付包.zip`
+
+详细发版规则见 [RELEASE.md](E:\guanlixitong\RELEASE.md)。
 
 ## 局域网部署
 

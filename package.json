@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "start:lan": "next start --hostname 0.0.0.0 --port 3021",
+    "release:bundle": "powershell -ExecutionPolicy Bypass -File .\\scripts\\release-bundle.ps1",
     "lint": "next lint",
     "db:prepare": "node scripts/prepare-db.mjs",
     "db:push": "node scripts/prepare-db.mjs && prisma db push",
