@@ -110,38 +110,40 @@ export function SidebarNav(props: {
         />
       </div>
 
-      <nav className="mt-6 flex flex-1 flex-col gap-2">
-        {currentNavItems.map((item) => {
-          const Icon = item.icon;
-          const active = pathname === item.href;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition",
-                active
-                  ? "bg-brand-600 text-white"
-                  : "text-slate-300 hover:bg-white/5 hover:text-white"
-              )}
-            >
-              <Icon className="h-4 w-4" />
-              {item.label}
-            </Link>
-          );
-        })}
-      </nav>
+      <div className="mt-6 min-h-0 flex-1 overflow-y-auto pr-1">
+        <nav className="flex flex-col gap-2">
+          {currentNavItems.map((item) => {
+            const Icon = item.icon;
+            const active = pathname === item.href;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  "flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition",
+                  active
+                    ? "bg-brand-600 text-white"
+                    : "text-slate-300 hover:bg-white/5 hover:text-white"
+                )}
+              >
+                <Icon className="h-4 w-4" />
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
 
-      <div className="rounded-3xl border border-brand-500/30 bg-brand-500/10 p-4">
-        <div className="flex items-center gap-3">
-          <div className="rounded-2xl bg-white/10 p-2">
-            <BarChart3 className="h-4 w-4 text-brand-200" />
-          </div>
-          <div>
-            <p className="text-sm font-semibold text-white">经营视角</p>
-            <p className="text-xs leading-5 text-slate-300">
-              所有退款影响都会回写到期次 ROI 与责任归因。
-            </p>
+        <div className="mt-6 rounded-3xl border border-brand-500/30 bg-brand-500/10 p-4">
+          <div className="flex items-center gap-3">
+            <div className="rounded-2xl bg-white/10 p-2">
+              <BarChart3 className="h-4 w-4 text-brand-200" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-white">经营视角</p>
+              <p className="text-xs leading-5 text-slate-300">
+                所有退款影响都会回写到期次 ROI 与责任归因。
+              </p>
+            </div>
           </div>
         </div>
       </div>
