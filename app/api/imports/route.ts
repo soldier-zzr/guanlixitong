@@ -3,6 +3,19 @@ import { getCurrentActorContext } from "@/lib/server/actor";
 import { importIntakeWorkbook, importTailWorkbook } from "@/lib/server/importers";
 import { recalculateAllCohortStats } from "@/lib/server/recompute";
 
+function isUploadFile(
+  value: FormDataEntryValue | null
+): value is File {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      "size" in value &&
+      typeof value.size === "number" &&
+      "arrayBuffer" in value &&
+      typeof value.arrayBuffer === "function"
+  );
+}
+
 export async function POST(request: Request) {
   try {
     const { actor, permissions } = await getCurrentActorContext();
@@ -16,7 +29,7 @@ export async function POST(request: Request) {
       mode = String(form.get("mode") || "");
       filePath = form.get("filePath") ? String(form.get("filePath")) : null;
       const file = form.get("file");
-      if (file instanceof File && file.size > 0) {
+      if (isUploadFile(file) && file.size > 0) {
         fileBuffer = Buffer.from(await file.arrayBuffer());
       }
     } else {
